@@ -1,4 +1,4 @@
-"""premiere-bridge — drive Adobe Premiere Pro from the command line.
+"""premiere-cli — drive Adobe Premiere Pro from the command line.
 
 A Python CLI (``premiere-cli``, ``premiere-log``) paired with a bundled CEP
 panel that exposes Premiere Pro's ExtendScript/QE APIs over a local HTTP

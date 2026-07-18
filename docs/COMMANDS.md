@@ -1,6 +1,6 @@
 # Premiere Bridge panel — command reference
 
-The CEP panel bundled in this package (`src/premiere_bridge/panel/`)
+The CEP panel bundled in this package (`src/premiere_cli/panel/`)
 displays log messages from automation scripts AND executes
 ExtendScript-backed commands against the open Premiere Pro project. This
 document is the full HTTP/command reference; the `premiere-cli` tool is a

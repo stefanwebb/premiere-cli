@@ -1,6 +1,6 @@
 """Install the bundled Premiere Bridge CEP panel and diagnose the setup.
 
-The CEP extension ships inside this package (``premiere_bridge/panel/``).
+The CEP extension ships inside this package (``premiere_cli/panel/``).
 ``premiere-cli install-panel`` copies it into Adobe's user-level CEP
 extensions directory and enables PlayerDebugMode (required for unsigned
 extensions); ``premiere-cli doctor`` checks each link in the chain and
@@ -27,7 +27,7 @@ CSXS_VERSIONS = ("10", "11", "12")
 
 def _package_panel_dir() -> str:
     """Filesystem path of the panel directory bundled inside this package."""
-    panel = resources.files("premiere_bridge") / "panel"
+    panel = resources.files("premiere_cli") / "panel"
     path = str(panel)
     if not os.path.isdir(path):
         raise RuntimeError(
@@ -137,7 +137,7 @@ def install_panel(symlink: bool = False) -> int:
 
 def _package_version() -> str:
     try:
-        from premiere_bridge import __version__
+        from premiere_cli import __version__
 
         return __version__
     except Exception:

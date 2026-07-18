@@ -1,11 +1,11 @@
 {
-  "name": "premiere-bridge",
+  "name": "premiere-cli",
   "owner": {
     "name": "Stefan Webb"
   },
   "plugins": [
     {
-      "name": "premiere-bridge",
+      "name": "premiere-cli",
       "source": "./",
       "description": "Drive Adobe Premiere Pro from Claude Code via the premiere-cli command-line tool and its bundled CEP bridge panel",
       "version": "0.2.0"

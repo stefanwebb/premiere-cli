@@ -5,7 +5,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-from premiere_bridge import log as premiere_log
+from premiere_cli import log as premiere_log
 
 
 class _RecordingHandler(BaseHTTPRequestHandler):

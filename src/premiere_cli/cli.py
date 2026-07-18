@@ -2148,11 +2148,11 @@ def main() -> None:
     # Local setup subcommands — handled entirely in Python, never sent to the
     # panel's /command endpoint.
     if args.subcommand == "install-panel":
-        from premiere_bridge import panel_install
+        from premiere_cli import panel_install
 
         sys.exit(panel_install.install_panel(symlink=args.symlink))
     if args.subcommand == "doctor":
-        from premiere_bridge import panel_install
+        from premiere_cli import panel_install
 
         sys.exit(panel_install.doctor(port=args.port))
 

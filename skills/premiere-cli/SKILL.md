@@ -12,10 +12,10 @@ displays text in the panel and never touches the project.
 
 ## Setup (once per machine)
 
-`premiere-cli` comes from the `premiere-bridge` Python package
-(https://github.com/stefanwebb/premiere-bridge):
+`premiere-cli` comes from the `premiere-cli` Python package
+(https://github.com/stefanwebb/premiere-cli):
 
-    pipx install premiere-bridge        # or: uv tool install premiere-bridge
+    pipx install premiere-cli        # or: uv tool install premiere-cli
     premiere-cli install-panel          # installs the CEP panel + enables PlayerDebugMode
     # restart Premiere Pro, open Window > Extensions > Premiere Bridge
     premiere-cli doctor                 # verifies the whole chain

@@ -1,12 +1,13 @@
 {
-  "name": "premiere-bridge",
-  "displayName": "Premiere Bridge",
+  "name": "premiere-cli",
+  "displayName": "Premiere CLI",
   "version": "0.2.0",
   "description": "Drive Adobe Premiere Pro from Claude Code via the premiere-cli command-line tool and its bundled CEP bridge panel",
   "author": {
     "name": "Stefan Webb"
   },
-  "homepage": "https://github.com/stefanwebb/premiere-bridge",
-  "repository": "https://github.com/stefanwebb/premiere-bridge",
+  "homepage": "https://github.com/stefanwebb/premiere-cli",
+  "repository": "https://github.com/stefanwebb/premiere-cli",
+  "license": "CC-BY-SA-4.0",
   "keywords": ["premiere-pro", "adobe", "video-editing", "automation", "cep", "extendscript"]
 }

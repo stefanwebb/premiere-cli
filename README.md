@@ -1,8 +1,8 @@
-# premiere-bridge
+# premiere-cli
 
 Drive Adobe Premiere Pro from the command line.
 
-`premiere-bridge` pairs a zero-dependency Python CLI (`premiere-cli`,
+`premiere-cli` pairs a zero-dependency Python CLI (`premiere-cli`,
 `premiere-log`) with a bundled CEP panel ("Premiere Bridge") that runs a
 local HTTP server (port 47823) inside Premiere Pro and exposes its
 ExtendScript / QE scripting APIs as ~230 JSON-in/JSON-out commands —
@@ -17,8 +17,8 @@ project for you.
 
 ```bash
 # 1. The CLI (isolated, no dependencies)
-pipx install git+https://github.com/stefanwebb/premiere-bridge
-#    or: uv tool install git+https://github.com/stefanwebb/premiere-bridge
+pipx install git+https://github.com/stefanwebb/premiere-cli
+#    or: uv tool install git+https://github.com/stefanwebb/premiere-cli
 
 # 2. The CEP panel (copies it into Adobe's extensions dir + enables PlayerDebugMode)
 premiere-cli install-panel
@@ -52,8 +52,8 @@ Every command prints a JSON object: `{"ok": true, "result": ...}` or
 ## Use from Claude Code
 
 ```
-/plugin marketplace add stefanwebb/premiere-bridge
-/plugin install premiere-bridge@premiere-bridge
+/plugin marketplace add stefanwebb/premiere-cli
+/plugin install premiere-cli@premiere-cli
 ```
 
 This gives Claude the `premiere-cli` skill — a complete, behavior-annotated
@@ -74,7 +74,7 @@ premiere-cli ──HTTP──> CEP panel (Node server, port 47823)
 ```
 
 - Each command is one ExtendScript file under
-  `src/premiere_bridge/panel/host/commands/`, lazily loaded on first use.
+  `src/premiere_cli/panel/host/commands/`, lazily loaded on first use.
 - Mutating commands verify their own effect with read-backs (clip counts,
   property values, undo-stack index) — never by trusting an API's return
   value, since several Premiere APIs "succeed" without doing anything.
@@ -94,8 +94,8 @@ separately and depend on this package.
 ## Development
 
 ```bash
-git clone https://github.com/stefanwebb/premiere-bridge
-cd premiere-bridge
+git clone https://github.com/stefanwebb/premiere-cli
+cd premiere-cli
 pip install -e ".[dev]"
 premiere-cli install-panel --symlink   # panel edits apply on next panel reload
 pytest
@@ -104,7 +104,11 @@ pytest
 Adding a panel command means three edits: the new
 `host/commands/<name>.jsx`, its registration in `host/index.jsx`
 (`PPB_COMMANDS`), and the allowlist in `js/main.js` (`ALLOWED_COMMANDS`) —
-plus a CLI subparser in `src/premiere_bridge/cli.py` and a row in
+plus a CLI subparser in `src/premiere_cli/cli.py` and a row in
 `docs/COMMANDS.md`. Bump the version in `pyproject.toml`,
-`premiere_bridge/__init__.py`, and `PANEL_VERSION` in `js/main.js`
+`premiere_cli/__init__.py`, and `PANEL_VERSION` in `js/main.js`
 together (`premiere-cli doctor` flags mismatches).
+
+## License
+
+[CC-BY-SA-4.0](LICENSE).

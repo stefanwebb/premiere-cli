@@ -2,7 +2,7 @@ const http = require('http');
 
 const PORT = 47823;
 
-// Kept in lockstep with the premiere-bridge Python package version —
+// Kept in lockstep with the premiere-cli Python package version —
 // `premiere-cli doctor` compares the two and warns when the installed
 // panel is stale relative to the CLI that ships it.
 const PANEL_VERSION = '0.2.0';
