@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "premiere-bridge"
+# Keep in lockstep with premiere_bridge.__version__ and PANEL_VERSION in
+# src/premiere_bridge/panel/js/main.js.
+version = "0.2.0"
+description = "Drive Adobe Premiere Pro from the command line: a Python CLI plus a bundled CEP bridge panel exposing Premiere's scripting APIs over local HTTP"
+readme = "README.md"
+requires-python = ">=3.10"
+# Deliberately zero runtime dependencies — the CLI is stdlib-only, so
+# `pipx install` / `uv tool install` stays instant and conflict-free.
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/stefanwebb/premiere-bridge"
+
+[project.scripts]
+premiere-cli = "premiere_bridge.cli:main"
+premiere-log = "premiere_bridge.log:main"
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# The entire CEP panel ships inside the wheel so `premiere-cli install-panel`
+# can deploy it without a checkout.
+premiere_bridge = [
+    "panel/**/*",
+    "panel/.debug",
+]
