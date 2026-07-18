@@ -16,7 +16,7 @@ import urllib.error
 import urllib.request
 from importlib import resources
 
-EXTENSION_ID = "com.generativegamedev.premierebridge"
+EXTENSION_ID = "com.stefanwebb.premierecli"
 DEFAULT_PORT = 47823
 
 # CSXS major versions to enable PlayerDebugMode for. Premiere 2020-2022 use

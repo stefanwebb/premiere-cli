@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<ExtensionManifest Version="7.0" ExtensionBundleId="com.generativegamedev.premierebridge" ExtensionBundleVersion="1.0.0" ExtensionBundleName="Premiere Bridge">
+<ExtensionManifest Version="7.0" ExtensionBundleId="com.stefanwebb.premierecli" ExtensionBundleVersion="1.0.0" ExtensionBundleName="Premiere Bridge">
   <ExtensionList>
-    <Extension Id="com.generativegamedev.premierebridge.panel" Version="1.0.0" />
+    <Extension Id="com.stefanwebb.premierecli.panel" Version="1.0.0" />
   </ExtensionList>
   <ExecutionEnvironment>
     <HostList>
@@ -15,7 +15,7 @@
     </RequiredRuntimeList>
   </ExecutionEnvironment>
   <DispatchInfoList>
-    <Extension Id="com.generativegamedev.premierebridge.panel">
+    <Extension Id="com.stefanwebb.premierecli.panel">
       <DispatchInfo>
         <Resources>
           <MainPath>./index.html</MainPath>
