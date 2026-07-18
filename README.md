@@ -17,8 +17,8 @@ project for you.
 
 ```bash
 # 1. The CLI (isolated, no dependencies)
-pipx install git+https://github.com/stefanwebb/premiere-cli
-#    or: uv tool install git+https://github.com/stefanwebb/premiere-cli
+pipx install premiere-cli
+#    or: uv tool install premiere-cli
 
 # 2. The CEP panel (copies it into Adobe's extensions dir + enables PlayerDebugMode)
 premiere-cli install-panel
