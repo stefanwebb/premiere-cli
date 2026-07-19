@@ -104,6 +104,20 @@ def main() -> None:
         help="Diagnose the CLI -> panel -> Premiere chain: panel installed, panel reachable, versions matching, Premiere responding",
     )
 
+    init_project_parser = subparsers.add_parser(
+        "init-project",
+        help="Create a fresh, empty Premiere Pro project from the bundled empty-project template",
+    )
+    init_project_parser.add_argument("project_name", help="Name of the new project, e.g. project0002")
+    init_project_parser.add_argument(
+        "--series", default=None,
+        help="Optional series name; the project is nested under <base-dir>/<series>/<project_name>",
+    )
+    init_project_parser.add_argument(
+        "--base-dir", required=True,
+        help="Directory the project (or series) is created under",
+    )
+
     create_sequence_parser = subparsers.add_parser("create-sequence", help="Create a new sequence")
     create_sequence_parser.add_argument("--name", required=True, help="Name of the new sequence")
     create_sequence_parser.add_argument(
@@ -2155,6 +2169,10 @@ def main() -> None:
         from premiere_cli import panel_install
 
         sys.exit(panel_install.doctor(port=args.port))
+    if args.subcommand == "init-project":
+        from premiere_cli import init_project
+
+        sys.exit(init_project.init_project(args.project_name, args.series, args.base_dir))
 
     if args.subcommand == "create-sequence":
         command_args = {"name": args.name, "bin": args.bin, "fps": args.fps, "width": args.width, "height": args.height}

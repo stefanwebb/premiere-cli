@@ -30,6 +30,10 @@ premiere-cli install-panel
 premiere-cli doctor
 ```
 
+`premiere-cli init-project <name> --base-dir <path>` scaffolds a fresh,
+empty `.prproj` from a bundled template — no Premiere Pro session needed,
+so it works before step 3.
+
 Supported: macOS and Windows (CEP does not exist on Linux). The panel
 targets Premiere Pro 2020+ (CEP 10-12); the API behavior notes in
 [docs/BUILD_FINDINGS.md](docs/BUILD_FINDINGS.md) were live-calibrated on

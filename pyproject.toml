@@ -34,4 +34,5 @@ where = ["src"]
 premiere_cli = [
     "panel/**/*",
     "panel/.debug",
+    "templates/**/*",
 ]
