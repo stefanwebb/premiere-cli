@@ -9,9 +9,10 @@ ExtendScript / QE scripting APIs as ~230 JSON-in/JSON-out commands —
 reading project/sequence/clip state, editing the timeline, applying
 effects, managing markers and bins, exporting media and frames, and more.
 
-It is also a **Claude Code plugin**: install it and Claude gets a skill
-documenting every command, so it can inspect and edit your open Premiere
-project for you.
+The Claude Code skill for driving this CLI lives in the separate
+[premiere-ai-skills](https://github.com/stefanwebb/premiere-ai-skills)
+plugin, alongside the AI-assisted workflow skills — install that plugin
+to give Claude the skill.
 
 ## Install
 
@@ -52,8 +53,8 @@ Every command prints a JSON object: `{"ok": true, "result": ...}` or
 ## Use from Claude Code
 
 ```
-/plugin marketplace add stefanwebb/premiere-cli
-/plugin install premiere-cli@premiere-cli
+/plugin marketplace add stefanwebb/premiere-ai-skills
+/plugin install premiere-ai-skills@premiere-ai-skills
 ```
 
 This gives Claude the `premiere-cli` skill — a complete, behavior-annotated
