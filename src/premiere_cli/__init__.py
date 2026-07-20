@@ -8,4 +8,4 @@ server (port 47823).
 # Kept in lockstep with PANEL_VERSION in panel/js/main.js and the version in
 # pyproject.toml — `premiere-cli doctor` compares the installed panel's
 # version against this one.
-__version__ = "0.2.0"
+__version__ = "0.3.0"
