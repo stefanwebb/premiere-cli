@@ -1,27 +1,23 @@
 // Command: export-frame → ppb_exportFrame
 // Loaded lazily by ppb_dispatch (host/index.jsx) on first use, into the
-// same global ExtendScript context — shared helpers (ensureQEEnabled,
-// findSequenceByName, findBundledPresetByRelativePath, trySetSequenceRange,
-// getSequenceFps, timecodeToSeconds, ...) are already defined there.
+// same global ExtendScript context — shared helpers (findSequenceByName,
+// findBundledPresetByRelativePath, trySetSequenceRange, getSequenceFps,
+// timecodeToSeconds, ...) are already defined there.
 
-// A bundled still-image preset for the ppb_exportFrame AME fallback (see
-// below) — confirmed present on this machine's Premiere Pro 2026 install
-// at this relative path; re-verify after a Premiere version upgrade, same
-// caveat as extract-audio-track's FORMAT_PRESET_RELATIVE_PATHS. "Match
-// Source" means the preset inherits the sequence's own frame size, so no
+// A bundled still-image preset for the AME single-frame export below —
+// confirmed present on this machine's Premiere Pro 2026 install at this
+// relative path; re-verify after a Premiere version upgrade, same caveat
+// as extract-audio-track's FORMAT_PRESET_RELATIVE_PATHS. "Match Source"
+// means the preset inherits the sequence's own frame size, so no
 // width/height override is needed when using it.
 var STILL_IMAGE_PRESET_RELATIVE_PATH =
   "Contents/MediaIO/systempresets/3F3F3F3F_504E4720/PNG Sequence (Match Source).epr";
 
-// The QE exportFramePNG call (see ppb_exportFrame) and the AME
-// image-sequence export below can both write under a name other than the
-// exact path requested — QE appends ".png" even to an already-.png-
-// suffixed path ("frame.png" → "frame.png.png", confirmed live), and
 // Premiere treats a still-image preset as a one-frame image *sequence*,
 // appending a frame number to the base name ("frame.png" → "frame0.png",
 // confirmed live; padding may vary by preset/duration). Finds whichever
-// variant was actually written and renames it to the exact requested
-// path so callers reliably get the file where they asked for it.
+// variant was actually written and renames it to the exact requested path
+// so callers reliably get the file where they asked for it.
 //
 // Known variants are checked DIRECTLY by path, not found via a directory
 // scan: enumerating the parent directory returns an empty list on this
@@ -59,7 +55,6 @@ function locateAndNormalizeExportedFrame(outputPath) {
   }
 
   var knownVariants = [
-    outputPath + ".png",                      // QE double-extension quirk
     parentPath + "/" + base + "0" + ext,      // AME frame-number suffix
     parentPath + "/" + base + "00" + ext,
     parentPath + "/" + base + "000" + ext,
@@ -99,12 +94,27 @@ function locateAndNormalizeExportedFrame(outputPath) {
 }
 
 // Exports a single frame of a sequence, at a given timecode, to a PNG file.
-// qeSeq.exportFramePNG's argument order is version-dependent (per
-// PREMIERE_API_NOTES.md) and can silently write nothing on some builds —
-// this brute-forces a short list of plausible signatures and judges success
-// only by checking the filesystem for a real output file afterward, never
-// by trusting the call's own return value (same pattern as
-// remove-track-intervals' rippleDelete()/remove() guessing).
+//
+// qe.project.getActiveSequence().exportFramePNG was tried first in an
+// earlier version of this command (guessing at its version-dependent arg
+// order per PREMIERE_API_NOTES.md), judging success only by whether a file
+// was produced. That check is NOT sufficient: confirmed live 2026-07-20
+// that on this Premiere build, exportFramePNG ignores its position
+// argument in every arg-order variant tried (ticksString, Time object,
+// output-path-as-position, ticks-then-path, path-then-ticks) and always
+// exports whatever frame is currently rendered in the Program Monitor,
+// regardless of the requested timecode — while still writing a real file
+// and returning normally, so the file-existence check reported false
+// positives. Two exports requested 30 seconds apart came back
+// pixel-identical. Neither seq.setPlayerPosition() (standard DOM) nor
+// qeSequence.setCTI() (QE DOM) changed this.
+//
+// This command now exports exclusively via Adobe Media Encoder's
+// exportAsMediaDirect() — the same documented, blocking mechanism
+// ppb_extractAudioTrack already uses successfully — narrowing the
+// sequence's in/out points to exactly one frame around the target
+// timecode. Confirmed live to produce genuinely different, timecode-
+// correct frames (verified via pixel diff, not just file existence).
 function ppb_exportFrame(argsJson) {
   try {
     var args;
@@ -139,24 +149,8 @@ function ppb_exportFrame(argsJson) {
       }
     }
 
-    // QE DOM only ever operates on the active sequence tab — switch to it
-    // rather than erroring if the resolved sequence isn't already active
-    // (same approach as ppb_removeTrackIntervals).
     if (app.project.activeSequence !== seq) {
       app.project.activeSequence = seq;
-    }
-
-    try {
-      ensureQEEnabled();
-    } catch (e) {
-      return JSON.stringify({ ok: false, error: "app.enableQE() failed: " + e.toString() });
-    }
-    if (typeof qe === "undefined" || !qe.project) {
-      return JSON.stringify({ ok: false, error: "QE DOM not available after enableQE()" });
-    }
-    var qeSequence = qe.project.getActiveSequence();
-    if (!qeSequence) {
-      return JSON.stringify({ ok: false, error: "qe.project.getActiveSequence() returned nothing after activating the sequence" });
     }
 
     var fps = getSequenceFps(seq);
@@ -169,63 +163,7 @@ function ppb_exportFrame(argsJson) {
       width = settings.videoFrameWidth;
       height = settings.videoFrameHeight;
     } catch (e) {
-      // best-effort only — width/height-based attempts below are simply skipped if unreadable
-    }
-
-    // --- Snapshot playhead position, to restore afterward regardless of outcome ---
-    // Both the standard DOM's position (seq) and QE's own position (qeSequence)
-    // are snapshotted/restored: qeSequence.exportFramePNG reads QE's CTI, not
-    // the standard DOM's player position — confirmed live 2026-07-20, moving
-    // only seq's position left every export reading frame 0 regardless of the
-    // requested timecode.
-    var originalPosition = null;
-    try {
-      originalPosition = seq.getPlayerPosition();
-    } catch (e) {
-      originalPosition = null;
-    }
-    var originalCTI = null;
-    try {
-      originalCTI = qeSequence.CTI;
-    } catch (e) {
-      originalCTI = null;
-    }
-
-    var positionAttempts = [];
-    var ticksString = String(Math.round(timeSeconds * TICKS_PER_SECOND));
-    var timeObj = null;
-    try {
-      timeObj = new Time();
-      timeObj.seconds = timeSeconds;
-    } catch (e) {
-      timeObj = null;
-    }
-
-    var positionSet = false;
-    try {
-      seq.setPlayerPosition(ticksString);
-      positionAttempts.push({ form: "ticksString", success: true });
-      positionSet = true;
-    } catch (e) {
-      positionAttempts.push({ form: "ticksString", success: false, error: e.toString() });
-    }
-    if (!positionSet && timeObj !== null) {
-      try {
-        seq.setPlayerPosition(timeObj);
-        positionAttempts.push({ form: "TimeObject", success: true });
-        positionSet = true;
-      } catch (e) {
-        positionAttempts.push({ form: "TimeObject", success: false, error: e.toString() });
-      }
-    }
-
-    // qeSequence.exportFramePNG reads QE's own Current Time Indicator, set
-    // separately from the standard DOM's player position above.
-    try {
-      qeSequence.setCTI(ticksString);
-      positionAttempts.push({ form: "qeSetCTI", success: true });
-    } catch (e) {
-      positionAttempts.push({ form: "qeSetCTI", success: false, error: e.toString() });
+      // best-effort only — reported in the result, not required for export
     }
 
     var result = {
@@ -237,171 +175,82 @@ function ppb_exportFrame(argsJson) {
       height: height
     };
 
-    try {
-      if (!positionSet) {
-        return JSON.stringify({
-          ok: false,
-          error: "could not move the playhead to the requested timecode with any known argument form (ticks string, Time object)",
-          attempts: positionAttempts
-        });
+    // Clear any stale leftover from an earlier failed run — the exact
+    // requested path plus every known frame-numbered variant Premiere
+    // might write it under (see locateAndNormalizeExportedFrame) — so a
+    // leftover file's mere existence can't be mistaken for this run's
+    // output.
+    for (var staleRound = 0; staleRound < 8; staleRound++) {
+      var stale = locateAndNormalizeExportedFrame(args.outputPath);
+      if (stale === null) {
+        break;
       }
-
-      // Clear any stale leftovers from an earlier failed run — the exact
-      // requested path plus every known name variant Premiere might have
-      // written it under (see locateAndNormalizeExportedFrame) — so a
-      // leftover file's mere existence can't be mistaken for this run's
-      // output. Loops because multiple variants can coexist (e.g. one QE
-      // double-extension file AND one AME frame-numbered file).
-      for (var staleRound = 0; staleRound < 8; staleRound++) {
-        var stale = locateAndNormalizeExportedFrame(args.outputPath);
-        if (stale === null) {
-          break;
-        }
-        try {
-          stale.remove();
-        } catch (e) {
-          // best-effort — a failed cleanup doesn't block the export attempt
-          break;
-        }
-      }
-
-      // --- Path 1: QE DOM's exportFramePNG. Version-inconsistent arg
-      // order (per PREMIERE_API_NOTES.md) and confirmed live to sometimes
-      // return false / write nothing regardless of a syntactically
-      // correct call — verify by scanning the filesystem afterward, never
-      // by trusting the call's return value.
-      var guesses = [];
-      guesses.push({ args: [args.outputPath], call: [args.outputPath] });
-      if (width !== null && height !== null) {
-        guesses.push({ args: [args.outputPath, String(width), String(height)], call: [args.outputPath, String(width), String(height)] });
-      }
-      // Confirmed live on this Premiere build: passing the output path as
-      // BOTH arguments succeeds where sensible width/height strings do
-      // not — an undocumented quirk of this exportFramePNG build, kept as
-      // a guess rather than relied on, since other builds may differ.
-      guesses.push({ args: [args.outputPath, args.outputPath], call: [args.outputPath, args.outputPath] });
-      if (timeObj !== null) {
-        guesses.push({ args: ["<Time seconds=" + timeSeconds + ">", args.outputPath], call: [timeObj, args.outputPath] });
-      }
-      guesses.push({ args: [ticksString, args.outputPath], call: [ticksString, args.outputPath] });
-
-      var attempts = [];
-      var succeededWithArgs = null;
-      var qeProducedFile = null;
-
-      for (var g = 0; g < guesses.length && succeededWithArgs === null; g++) {
-        var guess = guesses[g];
-        try {
-          qeSequence.exportFramePNG.apply(qeSequence, guess.call);
-        } catch (e) {
-          attempts.push({ args: guess.args, success: false, error: e.toString() });
-          continue;
-        }
-
-        var producedFile = locateAndNormalizeExportedFrame(args.outputPath);
-        if (producedFile !== null) {
-          attempts.push({ args: guess.args, success: true });
-          succeededWithArgs = guess.args;
-          qeProducedFile = producedFile;
-        } else {
-          attempts.push({ args: guess.args, success: false, error: "no file produced" });
-        }
-      }
-
-      if (succeededWithArgs !== null) {
-        result.method = "qe";
-        result.attempts = attempts;
-        result.succeededWithArgs = succeededWithArgs;
-        result.fileSizeBytes = qeProducedFile.length;
-        return JSON.stringify({ ok: true, result: result });
-      }
-
-      // --- Path 2: every QE guess failed — fall back to a one-frame
-      // export through Adobe Media Encoder via the standard DOM's
-      // exportAsMediaDirect(), the same documented, blocking mechanism
-      // ppb_extractAudioTrack already uses successfully. Narrows the
-      // sequence's in/out points to exactly one frame (using the
-      // sequence's own frame duration, seq.timebase) around the target
-      // timecode, then restores the original in/out points afterward.
-      var amePresetPath = findBundledPresetByRelativePath(STILL_IMAGE_PRESET_RELATIVE_PATH);
-      if (!amePresetPath) {
-        return JSON.stringify({
-          ok: false,
-          error: "exportFramePNG failed with all known arg-order variants, and no bundled still-image preset was found for the Media Encoder fallback",
-          attempts: attempts
-        });
-      }
-
-      var originalInPoint = null;
-      var originalOutPoint = null;
       try {
-        originalInPoint = seq.getInPoint();
-        originalOutPoint = seq.getOutPoint();
+        stale.remove();
       } catch (e) {
-        // best-effort only — if these can't be read, we simply won't restore them
+        // best-effort — a failed cleanup doesn't block the export attempt
+        break;
       }
+    }
 
-      var frameDurationSeconds = 1 / fps;
-      var ameProducedFile = null;
-      var ameError = null;
+    var amePresetPath = findBundledPresetByRelativePath(STILL_IMAGE_PRESET_RELATIVE_PATH);
+    if (!amePresetPath) {
+      return JSON.stringify({
+        ok: false,
+        error: "no bundled still-image preset found for the Media Encoder export"
+      });
+    }
 
-      try {
-        var rangeOutcome = trySetSequenceRange(seq, timeSeconds, timeSeconds + frameDurationSeconds);
-        if (!rangeOutcome.ok) {
-          ameError = "could not set sequence in/out points with any known argument form (seconds, ticks string, Time object)";
-        } else {
-          try {
-            seq.exportAsMediaDirect(args.outputPath, amePresetPath, 1 /* ENCODE_IN_TO_OUT */);
-          } catch (e) {
-            ameError = "exportAsMediaDirect failed: " + e.toString();
-          }
+    var originalInPoint = null;
+    var originalOutPoint = null;
+    try {
+      originalInPoint = seq.getInPoint();
+      originalOutPoint = seq.getOutPoint();
+    } catch (e) {
+      // best-effort only — if these can't be read, we simply won't restore them
+    }
+
+    var frameDurationSeconds = 1 / fps;
+    var ameProducedFile = null;
+    var ameError = null;
+
+    try {
+      var rangeOutcome = trySetSequenceRange(seq, timeSeconds, timeSeconds + frameDurationSeconds);
+      if (!rangeOutcome.ok) {
+        ameError = "could not set sequence in/out points with any known argument form (seconds, ticks string, Time object)";
+      } else {
+        try {
+          seq.exportAsMediaDirect(args.outputPath, amePresetPath, 1 /* ENCODE_IN_TO_OUT */);
+        } catch (e) {
+          ameError = "exportAsMediaDirect failed: " + e.toString();
         }
-      } finally {
-        if (originalInPoint !== null && originalOutPoint !== null) {
-          try {
-            trySetSequenceRange(seq, originalInPoint.seconds, originalOutPoint.seconds);
-          } catch (e) {
-            // best-effort
-          }
-        }
       }
-
-      if (ameError === null) {
-        ameProducedFile = locateAndNormalizeExportedFrame(args.outputPath);
-      }
-
-      if (ameProducedFile === null) {
-        return JSON.stringify({
-          ok: false,
-          error: "exportFramePNG failed with all known arg-order variants, and the Media Encoder fallback also failed" +
-            (ameError ? ": " + ameError : " (no file produced)"),
-          attempts: attempts
-        });
-      }
-
-      result.method = "ame";
-      result.attempts = attempts;
-      result.presetPath = amePresetPath;
-      result.fileSizeBytes = ameProducedFile.length;
-
-      return JSON.stringify({ ok: true, result: result });
     } finally {
-      // Always restore the original playhead position, even if export threw.
-      if (originalPosition !== null) {
+      if (originalInPoint !== null && originalOutPoint !== null) {
         try {
-          seq.setPlayerPosition(originalPosition.ticks);
+          trySetSequenceRange(seq, originalInPoint.seconds, originalOutPoint.seconds);
         } catch (e) {
-          // best-effort — restoration failure doesn't change the command's outcome
-        }
-      }
-      if (originalCTI !== null) {
-        try {
-          qeSequence.setCTI(originalCTI.ticks);
-        } catch (e) {
-          // best-effort — restoration failure doesn't change the command's outcome
+          // best-effort
         }
       }
     }
+
+    if (ameError === null) {
+      ameProducedFile = locateAndNormalizeExportedFrame(args.outputPath);
+    }
+
+    if (ameProducedFile === null) {
+      return JSON.stringify({
+        ok: false,
+        error: "Media Encoder export failed" + (ameError ? ": " + ameError : " (no file produced)")
+      });
+    }
+
+    result.method = "ame";
+    result.presetPath = amePresetPath;
+    result.fileSizeBytes = ameProducedFile.length;
+
+    return JSON.stringify({ ok: true, result: result });
   } catch (e) {
     return JSON.stringify({ ok: false, error: e.toString() });
   }
