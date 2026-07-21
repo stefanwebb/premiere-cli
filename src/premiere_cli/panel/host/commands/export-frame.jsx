@@ -173,11 +173,22 @@ function ppb_exportFrame(argsJson) {
     }
 
     // --- Snapshot playhead position, to restore afterward regardless of outcome ---
+    // Both the standard DOM's position (seq) and QE's own position (qeSequence)
+    // are snapshotted/restored: qeSequence.exportFramePNG reads QE's CTI, not
+    // the standard DOM's player position — confirmed live 2026-07-20, moving
+    // only seq's position left every export reading frame 0 regardless of the
+    // requested timecode.
     var originalPosition = null;
     try {
       originalPosition = seq.getPlayerPosition();
     } catch (e) {
       originalPosition = null;
+    }
+    var originalCTI = null;
+    try {
+      originalCTI = qeSequence.CTI;
+    } catch (e) {
+      originalCTI = null;
     }
 
     var positionAttempts = [];
@@ -206,6 +217,15 @@ function ppb_exportFrame(argsJson) {
       } catch (e) {
         positionAttempts.push({ form: "TimeObject", success: false, error: e.toString() });
       }
+    }
+
+    // qeSequence.exportFramePNG reads QE's own Current Time Indicator, set
+    // separately from the standard DOM's player position above.
+    try {
+      qeSequence.setCTI(ticksString);
+      positionAttempts.push({ form: "qeSetCTI", success: true });
+    } catch (e) {
+      positionAttempts.push({ form: "qeSetCTI", success: false, error: e.toString() });
     }
 
     var result = {
@@ -370,6 +390,13 @@ function ppb_exportFrame(argsJson) {
       if (originalPosition !== null) {
         try {
           seq.setPlayerPosition(originalPosition.ticks);
+        } catch (e) {
+          // best-effort — restoration failure doesn't change the command's outcome
+        }
+      }
+      if (originalCTI !== null) {
+        try {
+          qeSequence.setCTI(originalCTI.ticks);
         } catch (e) {
           // best-effort — restoration failure doesn't change the command's outcome
         }
