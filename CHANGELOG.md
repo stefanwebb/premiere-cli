@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 — 2026-07-23
+
+### New features
+
+- **`desktop-set-input-lut` command** (macOS only, optional `macos-desktop`
+  extra) — sets a clip's Lumetri "Input LUT" by driving the native UI via
+  the Accessibility API + synthetic key events, since `apply-lut` can't
+  write this property via ExtendScript on this build. Refuses to run
+  unless exactly one clip is selected and Premiere is confirmed frontmost.
+  See [docs/DESKTOP_DRIVER_NOTES.md](docs/DESKTOP_DRIVER_NOTES.md).
+
 ## 0.3.1 — 2026-07-20
 
 ### Bug fixes

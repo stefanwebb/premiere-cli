@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "premiere-cli"
 # Keep in lockstep with premiere_cli.__version__ and PANEL_VERSION in
 # src/premiere_cli/panel/js/main.js.
-version = "0.3.1"
+version = "0.4.0"
 description = "Drive Adobe Premiere Pro from the command line: a Python CLI plus a bundled CEP bridge panel exposing Premiere's scripting APIs over local HTTP"
 readme = "README.md"
 license = {text = "CC-BY-SA-4.0"}
@@ -24,6 +24,14 @@ premiere-log = "premiere_cli.log:main"
 
 [project.optional-dependencies]
 dev = ["pytest"]
+# Only needed for `desktop-set-input-lut` (macOS only) — kept out of the base
+# install so `pipx install premiere-cli` stays zero-dependency for everyone
+# who doesn't need UI automation.
+macos-desktop = [
+    "pyobjc-framework-Cocoa",
+    "pyobjc-framework-ApplicationServices",
+    "pyobjc-framework-Quartz",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -40,6 +40,31 @@ targets Premiere Pro 2020+ (CEP 10-12); the API behavior notes in
 **Premiere Pro 26.3.0 (macOS)** — Premiere's undocumented QE APIs vary by
 build, so re-verify build-sensitive commands on other versions.
 
+### macOS desktop automation (optional)
+
+`desktop-set-input-lut` sets a clip's Lumetri "Input LUT" by driving the
+native UI directly (Accessibility API + synthetic key events) — a few
+things ExtendScript can't do on this build, like Input LUT, need this
+instead. macOS only; needs a separate extra so the base CLI stays
+zero-dependency:
+
+```bash
+pip install "premiere-cli[macos-desktop]"
+```
+
+The terminal (or whatever process runs the CLI) needs the **Accessibility**
+permission: System Settings > Privacy & Security > Accessibility. Grant it
+to the actual process running `premiere-cli` (Terminal, iTerm, etc.), not
+Premiere Pro.
+
+This command **posts real keyboard input to whatever app is frontmost** —
+keep Premiere Pro active and hands off the keyboard/mouse while it runs,
+or the input lands in the wrong app. It refuses to run if it can't confirm
+Premiere is frontmost, or if more than one clip is selected (driving the
+LUT picker with multiple clips selected applies the change to all of
+them). See [docs/DESKTOP_DRIVER_NOTES.md](docs/DESKTOP_DRIVER_NOTES.md)
+for the full set of findings behind how this works.
+
 ## Use from the command line
 
 ```bash

@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import platform
 import re
 import sys
 import urllib.error
@@ -117,6 +118,13 @@ def main() -> None:
         "--base-dir", required=True,
         help="Directory the project (or series) is created under",
     )
+
+    desktop_set_input_lut_parser = subparsers.add_parser(
+        "desktop-set-input-lut",
+        help="Set the selected clip's Lumetri Input LUT by driving the native UI "
+             "(macOS only; ExtendScript can't write this property on this build — see apply-lut)",
+    )
+    desktop_set_input_lut_parser.add_argument("path", help="Path to a .cube LUT file")
 
     create_sequence_parser = subparsers.add_parser("create-sequence", help="Create a new sequence")
     create_sequence_parser.add_argument("--name", required=True, help="Name of the new sequence")
@@ -2173,6 +2181,26 @@ def main() -> None:
         from premiere_cli import init_project
 
         sys.exit(init_project.init_project(args.project_name, args.series, args.base_dir))
+    if args.subcommand == "desktop-set-input-lut":
+        if platform.system() != "Darwin":
+            print(
+                json.dumps({"ok": False, "error": "desktop-set-input-lut is macOS only (drives the native Accessibility API)"}),
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        try:
+            from premiere_cli import desktop_driver
+        except ImportError as exc:
+            print(
+                json.dumps({
+                    "ok": False,
+                    "error": f"missing the macOS desktop-driver extra ({exc}) — install with: "
+                             "pip install 'premiere-cli[macos-desktop]'",
+                }),
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        sys.exit(desktop_driver.set_input_lut(args.path, port=args.port))
 
     if args.subcommand == "create-sequence":
         command_args = {"name": args.name, "bin": args.bin, "fps": args.fps, "width": args.width, "height": args.height}
