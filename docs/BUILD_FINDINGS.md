@@ -95,6 +95,8 @@ New negative findings from the same session:
 | `app.project.newBarsAndTone(...)` | "Illegal Parameter type" with the documented signature | `create-bars-and-tone` — **fixed by the QE 2-arg form, see corrections above** |
 | `qeClip.moveToTrack(...)` | ~~fails every arity~~ **CORRECTED — see above**: 4-arg `(vOff, aOff, "0", false)` with RELATIVE offsets works, losslessly | `move-clip-to-track` — fixable (drops the lossy remove+overwrite path) |
 | `clip.markers` (TrackItem marker collection) | undefined | `get-clip-markers` falls back to `projectItem.getMarkers()` (reports `markerSource`) |
+| Lumetri "Input LUT" written via `setValue(int)` | **writes and reads back "verified", but the RENDER DOES NOT CHANGE** — live-tested 2026-07-23 by sweeping the index 0/1/2/3 on one clip and exporting a frame each time: all four frames were byte-identical (max diff 0 over 8.3M px). Also confirmed in reverse: a clip whose LUT was chosen in the UI kept rendering that LUT after the property was set to 0 | Treat Input LUT as **UI-only**. The index is meaningful solely as a pointer into a per-instance dropdown that is populated by browsing in the UI; writing it from script mutates a value nothing reads. Cost me several wrong conclusions — a read-back "verified" is NOT evidence of a render change for this param, so verify via `export-frame` instead |
+| Lumetri Color's "Input LUT" set to a PATH STRING | "Illegal Parameter type" on all 10 combinations tried (2 same-named properties x 5 argument forms: bare path, path+`true`, `File` object, `File`+`true`, `File.fsName`) | **CORRECTED 2026-07-23 — the param is not un-settable, it is an INTEGER INDEX into Premiere's already-loaded LUT dropdown, not a path.** `set-effect-property --component-name "Lumetri Color" --property-name "Input LUT" --value 1 --value-type number` works and read-back-verifies (live-tested: 1 -> 0 -> verified). So a `.cube` can be selected programmatically ONLY if it is already registered in that dropdown (browse to it once in the UI, or drop it in Premiere's LUT folder); there is still no way to register a NEW file by path from script. `apply-lut` (which sends a string) therefore cannot work as designed — use `set-effect-property` with the index instead |
 
 ## APIs that lie (no-throw or wrong return, but effect differs)
 
@@ -170,7 +172,7 @@ New negative findings from the same session:
 (`add-to-render-queue`, `encode-project-item`, `encode-file`),
 `manage-proxies`, `set-item-offline`, `replace-clip-media`,
 `scene-edit-detection`, `auto-reframe-sequence`, `freeze-frame`,
-MOGRT/text/caption commands, `apply-lut`, `stabilize-clip`,
+MOGRT/text/caption commands, `stabilize-clip`,
 `copy-effects-between-clips`, `batch-apply-effect`, `set-clip-pan`
 (test clip was mono — no Panner exists on mono clips, so the error path
 is correct but the success path is unverified).
