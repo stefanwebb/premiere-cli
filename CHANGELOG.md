@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 — 2026-07-23
+
+### Bug fixes
+
+- **`desktop-*` commands could capture/act mid window-swap** — `desktop-take-screenshot` (and the other `desktop-*` primitives) confirmed Premiere was frontmost via the window server and immediately proceeded, but the actual window-swap animation/redraw can still be in flight at that instant — a screenshot taken right then could show a sliver of the previously-frontmost app. `_require_frontmost` now waits 0.5s after confirming activation before proceeding, but only when Premiere actually needed to be brought to front — skipped when it was already frontmost, so repeated calls while Premiere stays active aren't slowed down.
+
 ## 0.4.0 — 2026-07-23
 
 ### New features

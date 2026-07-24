@@ -296,13 +296,33 @@ def ensure_frontmost(app, timeout=3.0, poll=0.1, overlay=None):
     return False
 
 
+
+# Settle time after the window server confirms Premiere is frontmost:
+# `frontmost_pid()` flips to Premiere as soon as macOS assigns it the front
+# window, but the actual window-swap animation/redraw lags a bit behind
+# that — e.g. `desktop-take-screenshot` fired right on confirmation could
+# still capture a frame partway through the swap, showing a sliver of the
+# previously-frontmost app. This is a fixed wait, not polled, since there's
+# no observable signal for "swap animation finished."
+FRONTMOST_SETTLE_SECONDS = 0.5
+
+
 def _require_frontmost(app, overlay=None) -> bool:
     """Shared precondition for every `desktop-*` command: confirm Premiere
     is frontmost before sending any synthetic input, printing a
     `{"ok": False, ...}` JSON error on failure. Returns True once confirmed;
     on failure it has already printed the error, so the caller just needs
-    to propagate exit code 3."""
+    to propagate exit code 3.
+
+    If Premiere wasn't already frontmost, waits `FRONTMOST_SETTLE_SECONDS`
+    after confirmation before returning, to let the window-swap animation
+    finish (see that constant's docstring) — skipped when Premiere was
+    already frontmost, since nothing was mid-swap."""
+    already_frontmost = frontmost_pid() == app.processIdentifier()
     if ensure_frontmost(app, overlay=overlay):
+        if not already_frontmost:
+            wait = overlay.sleep if overlay is not None else time.sleep
+            wait(FRONTMOST_SETTLE_SECONDS)
         return True
     if overlay:
         overlay.info("⚠️  Couldn't focus Premiere\nclick its window, then rerun")
