@@ -365,6 +365,12 @@ def take_screenshot(output_path: str, port: int = DEFAULT_PANEL_PORT) -> int:
     Prints one JSON object and returns a process exit code: 0 ok, 1
     Premiere not running, 3 couldn't confirm frontmost, 5 `screencapture`
     itself failed or produced no file.
+
+    Unlike the other `desktop-*` primitives, this hides the status overlay
+    (rather than showing "driving") right before capturing — the overlay
+    is a real always-on-top window and `screencapture -x` captures the
+    whole screen, so leaving it up would bake its banner into the corner
+    of every screenshot.
     """
     output_path = os.path.abspath(os.path.expanduser(output_path))
 
@@ -379,7 +385,7 @@ def take_screenshot(output_path: str, port: int = DEFAULT_PANEL_PORT) -> int:
             return 3
 
         if overlay:
-            overlay.driving("taking a screenshot — don't touch input")
+            overlay.hide()
 
         parent = os.path.dirname(output_path)
         if parent:
