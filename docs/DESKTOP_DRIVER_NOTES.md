@@ -113,3 +113,80 @@ input-lut` sets it instead by driving the real native UI.
   after activation.
 - Two clips selected: confirmed the command refuses to proceed rather
   than silently applying the LUT to both.
+
+## Update (2026-07-23) — Lumetri Color added via the DOM, not the UI
+
+`ensure_lumetri_color` originally only handled "Lumetri Color effect
+entirely absent." Live use surfaced a second state it didn't cover: Lumetri
+Color attached via the DOM-side `apply-effect` command (`premiere-cli
+apply-effect --effect-name "Lumetri Color" ...`) rather than through
+Effect Controls' own "Add Lumetri Color Effect" picker. That path attaches
+the effect component directly with no UI interaction at all, so — unlike
+adding it through the UI, which auto-expands Basic Correction — it leaves
+Basic Correction collapsed. `lumetri_color_present` reports this identically
+to "not present" (the Input LUT combobox genuinely doesn't exist in the AX
+tree either way), but there was nothing left for `ensure_lumetri_color` to
+"add," so it failed with a misleading precondition error.
+
+9. **Effect Controls' six Lumetri Color section headers (Basic Correction,
+   Creative, Curves, Color Wheels & Match, HSL Secondary, Vignette) carry
+   NO accessible text label at all.** Confirmed by dumping the entire AX
+   tree and finding zero elements whose text contains "basic
+   correction"/"creative"/etc — they're pure canvas-drawn text, unlike
+   every other effect's own properties (which always interleave a
+   labelled "Toggle animation" button and a text field between rows). The
+   one accessible artifact per section is a bare, unlabelled `AXButton`
+   whose label IS its expand state (`"Not Selected"` collapsed, `"Selected"`
+   expanded) — and Lumetri Color is the only effect with exactly six of
+   these back-to-back: same x, evenly spaced by one row height (~21pt).
+   `_find_lumetri_section_toggles` fingerprints this shape rather than
+   any label, so it's independent of how many other effects (Motion,
+   Opacity, ...) precede Lumetri Color on the clip.
+10. **`AXPress` on that disclosure button reports success
+    (`kAXErrorSuccess`) while leaving the AX tree byte-for-byte unchanged**
+    — live-confirmed by diffing a full tree dump before/after the press:
+    identical element count, identical positions for every element,
+    including the pressed one. This matches the SAME symptom hit earlier
+    trying to `AXPress` the dedicated "Lumetri Color" panel tab (a
+    different control, same non-response). The fix, `click_element`, posts
+    a REAL synthetic mouse event (move, then down/up) at the element's
+    AX-reported center instead — confirmed working via a live
+    collapse/expand round-trip (collapse Basic Correction with a real
+    click, confirm the Input LUT combobox disappears, call
+    `ensure_lumetri_color`, confirm it reappears with the previously-set
+    LUT value intact).
+11. **A real mouse click risks landing on whatever app is ACTUALLY
+    frontmost, not whichever one a stale check confirmed** — live-hit when
+    the operator's own attention (and the OS's frontmost app) moved to a
+    different window in the gap between `ensure_frontmost` returning and
+    the click being sent. `click_element` re-checks `frontmost_pid()`
+    immediately before the mouse-move AND again immediately before the
+    down/up, aborting without sending input if focus slipped either time
+    — the existing on-screen overlay (`_make_overlay`) stays visible
+    through the whole sequence so the operator has a standing visual cue
+    not to touch input while any of this runs.
+12. **Two different panels can expose an Input LUT combobox matching the
+    identical content probe** — the compact row inside Effect Controls
+    (every function in this module is meant to target this one) and a
+    separate, dedicated "Lumetri Color" panel tab docked elsewhere. If
+    that dedicated tab is ALSO frontmost, its own combobox matches
+    `_combobox_containing(app_el, "Browse...")` just as well, so whichever
+    tab is actually active determines which one gets found and driven.
+    `set_input_lut` now calls `_activate_effect_controls_tab` (itself
+    using `click_element`, since this tab-switch button is ALSO
+    unresponsive to `AXPress`) before touching anything Lumetri-related,
+    and nothing in this module ever clicks the dedicated Lumetri Color
+    tab — every read/write here is scoped to Effect Controls specifically.
+
+### Live-tested (2026-07-23 continued)
+
+- Full collapse → recover round-trip: Basic Correction expanded, collapsed
+  again via a real click, then `ensure_lumetri_color` re-expanded it and
+  the Input LUT combobox reappeared with its previously-set value
+  (`corrected_00-00-14`) intact.
+- `ensure_lumetri_color`'s fast path (Lumetri Color already present and
+  expanded) confirmed still returns `True` immediately without attempting
+  any click.
+- `_activate_effect_controls_tab` confirmed callable mid-session without
+  disrupting the already-expanded Basic Correction state.
+  than silently applying the LUT to both.

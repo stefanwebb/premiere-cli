@@ -73,9 +73,13 @@ from ApplicationServices import (
     AXUIElementCopyAttributeValue,
     AXUIElementPerformAction,
     AXUIElementSetAttributeValue,
+    AXValueGetValue,
+    kAXValueCGPointType,
+    kAXValueCGSizeType,
 )
 from Quartz import (
     CGEventCreateKeyboardEvent,
+    CGEventCreateMouseEvent,
     CGEventKeyboardSetUnicodeString,
     CGEventPost,
     CGEventSetFlags,
@@ -83,6 +87,10 @@ from Quartz import (
     kCGHIDEventTap,
     kCGEventFlagMaskCommand,
     kCGEventFlagMaskShift,
+    kCGEventLeftMouseDown,
+    kCGEventLeftMouseUp,
+    kCGEventMouseMoved,
+    kCGMouseButtonLeft,
     kCGNullWindowID,
     kCGWindowListExcludeDesktopElements,
     kCGWindowListOptionOnScreenOnly,
@@ -100,7 +108,12 @@ AX_TITLE = "AXTitle"
 AX_VALUE = "AXValue"
 AX_DESC = "AXDescription"
 AX_WINDOWS = "AXWindows"
+AX_FOCUSED_WINDOW = "AXFocusedWindow"
+AX_POSITION = "AXPosition"
+AX_SIZE = "AXSize"
 AX_PRESS = "AXPress"
+
+EFFECT_CONTROLS_TAB_LABEL = "Effect Controls"
 
 # Virtual keycodes for chords / navigation / confirmation.
 KEY_A = 0
@@ -319,6 +332,70 @@ def ensure_frontmost(app, timeout=3.0, poll=0.1, overlay=None):
 
 
 # ----------------------------------------------------------------------------
+# Real synthetic mouse clicks — for controls that ignore AXPress
+# ----------------------------------------------------------------------------
+def _element_frame(element):
+    """(x, y, width, height) from AXPosition/AXSize, or None if either is
+    unreadable."""
+    err_pos, pos = AXUIElementCopyAttributeValue(element, AX_POSITION, None)
+    err_size, size = AXUIElementCopyAttributeValue(element, AX_SIZE, None)
+    if err_pos != 0 or err_size != 0:
+        return None
+    ok1, point = AXValueGetValue(pos, kAXValueCGPointType, None)
+    ok2, dims = AXValueGetValue(size, kAXValueCGSizeType, None)
+    if not (ok1 and ok2):
+        return None
+    return (point.x, point.y, dims.width, dims.height)
+
+
+def click_element(app, element, overlay=None, detail="don't touch input") -> bool:
+    """Post a REAL synthetic mouse click (move + down + up) at `element`'s
+    AX-reported center — not `AXPress`.
+
+    Needed because several of Premiere's custom-drawn controls (Effect
+    Controls' Lumetri Color section-disclosure buttons, its dedicated
+    "Lumetri Color" panel tab) report `AXPress` succeeding (`kAXErrorSuccess`)
+    while live-tested (2026-07-23) to leave the AX tree byte-for-byte
+    unchanged — unlike the "Add Lumetri Color Effect" / Input LUT dropdown
+    items elsewhere in this module, which genuinely are `AXPress`-driven.
+    Only use this for a specific, addressed element (never a coordinate
+    guess) — the position comes from AX, not a hardcoded screen location.
+
+    Re-verifies Premiere is still frontmost immediately before AND after the
+    mouse-move (the caller may have already confirmed it earlier, but focus
+    can change in the gap — live-observed when the operator's own attention
+    switched to a different app mid-drive). Returns False without clicking
+    if focus slipped at either check; never sends the down/up in that case.
+    """
+    frame = _element_frame(element)
+    if frame is None:
+        return False
+    x = frame[0] + frame[2] / 2
+    y = frame[1] + frame[3] / 2
+
+    pid = app.processIdentifier()
+    if frontmost_pid() != pid:
+        return False
+
+    if overlay:
+        overlay.driving(detail)
+
+    move = CGEventCreateMouseEvent(None, kCGEventMouseMoved, (x, y), kCGMouseButtonLeft)
+    CGEventPost(kCGHIDEventTap, move)
+    time.sleep(0.1)
+
+    if frontmost_pid() != pid:
+        return False
+
+    down = CGEventCreateMouseEvent(None, kCGEventLeftMouseDown, (x, y), kCGMouseButtonLeft)
+    up = CGEventCreateMouseEvent(None, kCGEventLeftMouseUp, (x, y), kCGMouseButtonLeft)
+    CGEventPost(kCGHIDEventTap, down)
+    time.sleep(0.05)
+    CGEventPost(kCGHIDEventTap, up)
+    return True
+
+
+# ----------------------------------------------------------------------------
 # Custom-drawn dropdown navigation (shared by the Input LUT combobox and the
 # Effect Controls "Add Lumetri Color Effect" combobox — same custom-drawn,
 # AXUnknown-item shape, same fix)
@@ -431,36 +508,164 @@ def lumetri_color_present(app_el, timeout=3.0) -> bool:
     return wait_for(lambda: input_lut_combobox(app_el)[0] is not None, timeout) is not None
 
 
-def ensure_lumetri_color(app_el, timeout=8.0) -> bool:
-    """Add the Lumetri Color effect to the selected clip if it doesn't already
-    have one. Returns True if Lumetri Color ends up applied (already there,
-    or successfully added), False otherwise.
+def _activate_effect_controls_tab(app, app_el, overlay=None) -> bool:
+    """Bring the "Effect Controls" panel tab to front via a real mouse click.
 
-    Uses the same content-lookup + keyboard-nav technique as the Input LUT
-    dropdown, pointed at a different control: Effect Controls' "Select
-    Effect" combobox has an "Add Lumetri Color Effect" item. Verifies by
-    re-checking `input_lut_combobox` rather than trusting the click —
-    same discipline as everything else here.
+    Premiere can expose Lumetri Color through TWO different panels, both
+    discoverable by the same AX content search this module uses everywhere
+    else: the compact row inside Effect Controls (what every function here
+    is meant to target) and a separate, dedicated "Lumetri Color" panel tab
+    docked elsewhere. If that dedicated tab is ALSO frontmost, its own Input
+    LUT combobox matches the same "Browse..." probe — so whichever tab is
+    actually active determines which one gets found and driven. Always
+    activating Effect Controls first, and never touching the dedicated
+    Lumetri Color tab anywhere in this module, keeps every read/write here
+    scoped to Effect Controls specifically (required after a live mixup
+    risk was flagged 2026-07-23).
 
-    Returns False (rather than raising) if the "Add Lumetri Color Effect"
-    control can't be found — e.g. Effect Controls isn't visible, or nothing
-    is selected. Callers should treat that as a precondition failure with an
-    actionable message, since there's a reliable DOM-side fallback
-    (`premiere-cli apply-effect --effect-name "Lumetri Color" ...`) that
-    needs only track/clip addressing this driver doesn't have.
+    Best-effort: returns False (non-fatal — callers already surface a
+    precondition-failure message) if the tab can't be found, e.g. Effect
+    Controls has been closed entirely.
+    """
+    window = ax_get(app_el, AX_FOCUSED_WINDOW)
+    if window is None:
+        return False
+    hits = search(
+        window,
+        lambda r, s, l: r == "AXRadioButton" and l == EFFECT_CONTROLS_TAB_LABEL,
+        budget=20000,
+    )
+    if not hits:
+        return False
+    return click_element(
+        app, hits[0][0], overlay=overlay, detail="activating Effect Controls — don't touch input"
+    )
+
+
+def _find_lumetri_section_toggles(app_el, run_length=6, y_step=21.0, tolerance=3.0):
+    """Locate Lumetri Color's own Basic Correction/Creative/Curves/Color
+    Wheels & Match/HSL Secondary/Vignette accordion headers in Effect
+    Controls, in top-to-bottom order (index 0 = Basic Correction).
+
+    These six section headers carry NO accessible label at all — confirmed
+    live 2026-07-23 by dumping the whole AX tree and finding zero elements
+    whose text contains "basic correction"/"creative"/etc: they're pure
+    canvas text, unlike every other effect's OWN properties (which always
+    interleave a labelled "Toggle animation" button and a text field
+    between rows). The one thing that IS accessible per section is a bare,
+    unlabelled `AXButton` reading "Not Selected" — and Lumetri Color is the
+    only effect with exactly six of these back-to-back: same x, evenly
+    spaced by one row height. That shape is the fingerprint this searches
+    for, independent of how many other effects (Motion, Opacity, ...)
+    precede Lumetri Color on the clip.
+
+    Returns None if the pattern isn't found — e.g. Effect Controls isn't
+    visible, Lumetri Color isn't on the clip yet, or a future Premiere
+    build changes this layout (re-verify after any Premiere upgrade, same
+    caveat as everything else in this module).
+    """
+    window = ax_get(app_el, AX_FOCUSED_WINDOW)
+    if window is None:
+        return None
+
+    candidates = []
+    for child in ax_children(window):
+        if ax_get(child, AX_ROLE) != "AXButton" or ax_label(child) != "Not Selected":
+            candidates.append(None)
+            continue
+        candidates.append((child, _element_frame(child)))
+
+    n = len(candidates)
+    for start in range(n - run_length + 1):
+        chunk = candidates[start:start + run_length]
+        if any(c is None or c[1] is None for c in chunk):
+            continue
+        xs = {round(c[1][0]) for c in chunk}
+        if len(xs) != 1:
+            continue
+        ys = [c[1][1] for c in chunk]
+        steps = [ys[i + 1] - ys[i] for i in range(len(ys) - 1)]
+        if all(abs(step - y_step) <= tolerance for step in steps):
+            return [c[0] for c in chunk]
+    return None
+
+
+def expand_basic_correction(app, app_el, overlay=None, timeout=5.0) -> bool:
+    """Expand Lumetri Color's "Basic Correction" accordion section in
+    Effect Controls, so its Input LUT combobox exists in the AX tree.
+
+    Needed specifically for Lumetri Color added via the DOM-side
+    `apply-effect` command (`premiere-cli apply-effect --effect-name
+    "Lumetri Color" ...`): that path attaches the effect without ever
+    driving the UI, leaving Basic Correction collapsed — a state Premiere's
+    own "Add Lumetri Color Effect" UI flow never produces (it auto-expands
+    Basic Correction on add). `ensure_lumetri_color` falls back to this when
+    Lumetri Color is already attached but its Input LUT combobox still
+    isn't found.
+
+    Uses `click_element` (a real synthetic mouse click, not `AXPress` —
+    live-tested 2026-07-23: `AXPress` on this button reports success while
+    leaving the AX tree byte-for-byte unchanged). Returns True once the
+    Input LUT combobox becomes visible, False if the disclosure row can't
+    be located or the click doesn't reveal it within `timeout`.
+    """
+    if input_lut_combobox(app_el)[0] is not None:
+        return True
+
+    toggles = _find_lumetri_section_toggles(app_el)
+    if toggles is None:
+        return False
+
+    basic_correction = toggles[0]
+    if not click_element(
+        app, basic_correction, overlay=overlay,
+        detail="expanding Basic Correction — don't touch input",
+    ):
+        return False
+
+    return wait_for(lambda: input_lut_combobox(app_el)[0] is not None, timeout) is not None
+
+
+def ensure_lumetri_color(app, app_el, overlay=None, timeout=8.0) -> bool:
+    """Add the Lumetri Color effect to the selected clip if it doesn't
+    already have one, or expand it if it's already attached but collapsed.
+    Returns True if Lumetri Color ends up applied AND its Input LUT
+    combobox is reachable (already there, added via the UI, or expanded),
+    False otherwise.
+
+    Tries, in order:
+    1. Already present (`lumetri_color_present`) — nothing to do.
+    2. Effect Controls' "Select Effect" combobox has an "Add Lumetri Color
+       Effect" item — same content-lookup + keyboard-nav technique as the
+       Input LUT dropdown. Verifies by re-checking `input_lut_combobox`
+       rather than trusting the click, same discipline as everything else
+       here.
+    3. `expand_basic_correction` — covers Lumetri Color already being
+       attached (e.g. via the DOM-side `apply-effect` command) with Basic
+       Correction collapsed, which looks identical to "not present" here
+       (the Input LUT combobox doesn't exist in the AX tree either way)
+       but has nothing left to "add" via step 2.
+
+    Returns False (rather than raising) if none of these succeed — e.g.
+    Effect Controls isn't visible, or nothing is selected. Callers should
+    treat that as a precondition failure with an actionable message, since
+    there's a reliable DOM-side fallback (`premiere-cli apply-effect
+    --effect-name "Lumetri Color" ...`) that needs only track/clip
+    addressing this driver doesn't have.
     """
     if lumetri_color_present(app_el):
         return True
 
-    if _combobox_containing(app_el, "Add Lumetri Color Effect")[0] is None:
-        return False
+    if _combobox_containing(app_el, "Add Lumetri Color Effect")[0] is not None:
+        if _open_and_select(
+            lambda: _combobox_containing(app_el, "Add Lumetri Color Effect"),
+            "Add Lumetri Color Effect",
+            lambda: input_lut_combobox(app_el)[0] is not None,
+            timeout=timeout,
+        ):
+            return True
 
-    return _open_and_select(
-        lambda: _combobox_containing(app_el, "Add Lumetri Color Effect"),
-        "Add Lumetri Color Effect",
-        lambda: input_lut_combobox(app_el)[0] is not None,
-        timeout=timeout,
-    )
+    return expand_basic_correction(app, app_el, overlay=overlay, timeout=timeout)
 
 
 def open_lut_browse_panel(app_el, timeout=8.0) -> bool:
@@ -662,11 +867,19 @@ def set_input_lut(path: str, port: int = DEFAULT_PANEL_PORT) -> int:
 
         el = app_ax_element(app)
 
+        # Scope everything below to the Effect Controls panel specifically —
+        # never the dedicated "Lumetri Color" panel tab, which can expose an
+        # Input LUT combobox matching the same content probe if it's ALSO
+        # frontmost. Best-effort: a failure here just means Effect Controls
+        # was already active (the common case) or couldn't be found, which
+        # the checks below will surface on their own.
+        _activate_effect_controls_tab(app, el, overlay=overlay)
+
         if overlay:
             overlay.driving("checking Lumetri Color — don't touch input")
         applied_lumetri_color = False
         if not lumetri_color_present(el):
-            applied_lumetri_color = ensure_lumetri_color(el)
+            applied_lumetri_color = ensure_lumetri_color(app, el, overlay=overlay)
             if not applied_lumetri_color:
                 if overlay:
                     overlay.info("⚠️  No Lumetri Color on this clip\nselect a clip, open Effect Controls")
