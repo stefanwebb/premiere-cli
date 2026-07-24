@@ -42,11 +42,15 @@ build, so re-verify build-sensitive commands on other versions.
 
 ### macOS desktop automation (optional)
 
-`desktop-set-input-lut` sets a clip's Lumetri "Input LUT" by driving the
-native UI directly (Accessibility API + synthetic key events) — a few
-things ExtendScript can't do on this build, like Input LUT, need this
-instead. macOS only; needs a separate extra so the base CLI stays
-zero-dependency:
+Generic UI-automation primitives for driving Premiere's native UI directly
+(Accessibility API + synthetic key/mouse events) — for actions ExtendScript
+can't do on this build: `desktop-take-screenshot`, `desktop-press-key`,
+`desktop-enter-text`, `desktop-enter-text-with-validate`,
+`desktop-move-mouse`, `desktop-click-mouse` — plus a persistent on-screen
+notification (`desktop-notify` / `desktop-dismiss-notifications`)
+independent of any one command's own process. All confirm Premiere is
+frontmost before sending input. macOS only; needs a separate extra so the
+base CLI stays zero-dependency:
 
 ```bash
 pip install "premiere-cli[macos-desktop]"

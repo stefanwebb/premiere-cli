@@ -1,10 +1,23 @@
 # Desktop driver findings — macOS Accessibility API + CGEvent
 
-Live findings from building `desktop_driver.py` (`desktop-set-input-lut`),
-observed against Premiere Pro 2026 (26.3.0, macOS). These are macOS
-Accessibility/CGEvent findings, not Premiere ExtendScript/QE ones — see
-[BUILD_FINDINGS.md](BUILD_FINDINGS.md) for those. Re-verify after any macOS
-or Premiere upgrade.
+Live findings from building `desktop_driver.py`, observed against Premiere
+Pro 2026 (26.3.0, macOS). These are macOS Accessibility/CGEvent findings,
+not Premiere ExtendScript/QE ones — see [BUILD_FINDINGS.md](BUILD_FINDINGS.md)
+for those. Re-verify after any macOS or Premiere upgrade.
+
+> **2026-07-23 — `desktop-set-input-lut` removed.** Everything below through
+> "Update (2026-07-23 continued) — Lumetri Color added via the DOM, not the
+> UI" documents that command's implementation, which drove Premiere's
+> Lumetri "Input LUT" control via AX content-matching and keyboard-nav over
+> its custom-drawn dropdown. It was removed to be rebuilt on the generic
+> `desktop-*` primitives (see the module docstring) plus AI vision-language
+> screen understanding, rather than hand-written AX-tree navigation specific
+> to one control. The findings are kept as historical background — much of
+> it (AX-tree-lags-input behavior, `AXFocusedUIElement` unreliability,
+> `AXPress` not working on certain custom-drawn controls) generalizes to
+> whatever replaces it. The section "Update (2026-07-23 continued) —
+> generic desktop-driving primitives" further down covers the primitives
+> that DO still exist.
 
 ## Why this exists
 
@@ -189,4 +202,60 @@ tree either way), but there was nothing left for `ensure_lumetri_color` to
   any click.
 - `_activate_effect_controls_tab` confirmed callable mid-session without
   disrupting the already-expanded Basic Correction state.
-  than silently applying the LUT to both.
+
+## Update (2026-07-23 continued) — generic desktop-driving primitives
+
+Added six raw primitives (`desktop-take-screenshot`, `desktop-press-key`,
+`desktop-enter-text`, `desktop-enter-text-with-validate`,
+`desktop-move-mouse`, `desktop-click-mouse`) plus a persistent notification
+window (`desktop-notify` / `desktop-dismiss-notifications`), for driving
+Premiere beyond the Lumetri-specific commands above. All six DRIVE
+commands share `_require_frontmost` (same confirm-before-input discipline
+as `set_input_lut`).
+
+13. **Premiere's app-wide `AXFocusedUIElement` does not reliably track its
+    own custom-drawn panels.** Clicked directly into the Project panel's
+    search field (using its exact AX-reported frame, not a coordinate
+    guess) and immediately read `AXFocusedUIElement` — it reported an
+    unrelated, stale `"Select Zoom Level"` combobox (value `"Fit"`) both
+    times, across two separate attempts. The text itself DID land
+    correctly (confirmed separately: `desktop-enter-text` followed by
+    `desktop-take-screenshot` showed the search field reading `"test123"`
+    and the bin filtered to 1 item) — only the FOCUS READ-BACK is
+    unreliable, not the actual keystroke delivery. This means
+    `desktop-enter-text-with-validate` will most likely false-fail (exit
+    4) against Premiere's own panels; it's documented as reliable only
+    against genuinely native AX-compliant fields (e.g. the "Select a LUT"
+    dialog's own field, addressed directly by `drive_open_panel_to` rather
+    than via focus lookup). For typing into Premiere's own UI, prefer
+    plain `desktop-enter-text` and verify visually with
+    `desktop-take-screenshot` instead.
+14. **A persistent notification window needs a SEPARATE daemon process,
+    not another `desktop_overlay.Overlay`** — `Overlay` (used by every
+    DRIVE command's status banner) only lives as long as that one
+    command's own process, which exits (and closes the window) as soon as
+    the command finishes. `desktop-notify` needs the opposite: a window
+    that OUTLIVES the CLI invocation that created it, so a LATER
+    `desktop-notify` call (a different process) can update the SAME
+    window rather than opening a new one, and `desktop-dismiss-
+    notifications` can close it. `notify_daemon.py` solves this as a
+    small standalone process (spawned detached via `start_new_session` on
+    first use) running its own Cocoa run loop on the main thread and a
+    tiny local HTTP server on a background thread — the HTTP handler only
+    ever sets flags under a lock; every actual AppKit call happens on the
+    main thread's own polling loop, avoiding any cross-thread Cocoa calls.
+    Live-tested: a second `desktop-notify` call updated the same window's
+    text/color in place (confirmed via screenshot — one window, not two,
+    and exactly one `notify_daemon` process via `pgrep`);
+    `desktop-dismiss-notifications` closed it and the process exited
+    (confirmed gone via both a screenshot and `pgrep`); calling dismiss
+    again with nothing running returned `{"ok": true, "wasRunning":
+    false}` rather than erroring.
+15. **Coordinate math done by hand (screenshot pixels → AX points) is
+    error-prone even with the actual retina scale factor accounted for**
+    — a hand-computed click target for the Project panel's search field
+    landed on the "Select Zoom Level" combobox instead, one panel row off.
+    Getting the field's exact frame via AX (`search()` + `_element_frame`)
+    and clicking its computed center worked first try. Prefer AX-derived
+    coordinates over manual screenshot measurement whenever the target
+    element can be addressed by role/label.

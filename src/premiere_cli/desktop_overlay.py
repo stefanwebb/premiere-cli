@@ -136,6 +136,15 @@ class Overlay:
     def info(self, text):
         self._show(text, _SLATE)
 
+    def notify(self, message, state="info"):
+        """Show `message` with the accent for `state`
+        ("waiting"/"driving"/"done"/"info") — no fixed prefix text, unlike
+        `waiting`/`driving`/`done` above, which are tailored to the
+        desktop-driving workflow specifically. Used by `notify_daemon` for
+        arbitrary caller-supplied notifications."""
+        accent = {"waiting": _AMBER, "driving": _RED, "done": _GREEN, "info": _SLATE}.get(state, _SLATE)
+        self._show(message, accent)
+
     def hide(self):
         self._panel.orderOut_(None)
         self.sleep(0.02)

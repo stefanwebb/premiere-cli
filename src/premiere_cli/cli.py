@@ -28,6 +28,32 @@ def _validate_response(parsed_json) -> dict:
 _INTERVAL_LINE_RE = re.compile(r"^(\d{2,3}:\d{2}:\d{2})\s*-\s*(\d{2,3}:\d{2}:\d{2})$")
 
 
+def _load_desktop_driver(subcommand: str):
+    """Import `desktop_driver`, or exit with a well-formed JSON error if
+    this isn't macOS or the `macos-desktop` extra isn't installed — the
+    same two-check preamble every `desktop-*` subcommand needs before it
+    can do anything."""
+    if platform.system() != "Darwin":
+        print(
+            json.dumps({"ok": False, "error": f"{subcommand} is macOS only (drives the native Accessibility API)"}),
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    try:
+        from premiere_cli import desktop_driver
+    except ImportError as exc:
+        print(
+            json.dumps({
+                "ok": False,
+                "error": f"missing the macOS desktop-driver extra ({exc}) — install with: "
+                         "pip install 'premiere-cli[macos-desktop]'",
+            }),
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return desktop_driver
+
+
 def _parse_intervals_file(path: str) -> list:
     """Parse a remove_pauses.py-style cuts file ("MM:SS:FF - MM:SS:FF" per
     line, blank lines ignored) into [{"start": ..., "end": ...}, ...].
@@ -119,12 +145,72 @@ def main() -> None:
         help="Directory the project (or series) is created under",
     )
 
-    desktop_set_input_lut_parser = subparsers.add_parser(
-        "desktop-set-input-lut",
-        help="Set the selected clip's Lumetri Input LUT by driving the native UI "
-             "(macOS only; ExtendScript can't write this property on this build — see apply-lut)",
+    desktop_take_screenshot_parser = subparsers.add_parser(
+        "desktop-take-screenshot",
+        help="Confirm Premiere is frontmost, then save a full-screen screenshot (macOS only)",
     )
-    desktop_set_input_lut_parser.add_argument("path", help="Path to a .cube LUT file")
+    desktop_take_screenshot_parser.add_argument("output_path", help="File path to save the screenshot to (e.g. /tmp/frame.png)")
+
+    desktop_press_key_parser = subparsers.add_parser(
+        "desktop-press-key",
+        help="Confirm Premiere is frontmost, then send one synthetic key press (macOS only)",
+    )
+    desktop_press_key_parser.add_argument(
+        "--key", required=True,
+        help="Key name (e.g. 'return', 'escape', 'up', 'a') or a decimal virtual keycode",
+    )
+    desktop_press_key_parser.add_argument(
+        "--modifier", dest="modifiers", action="append", default=[],
+        choices=["command", "cmd", "shift", "option", "alt", "control", "ctrl"],
+        help="Modifier held during the press; repeat for multiple (e.g. --modifier cmd --modifier shift)",
+    )
+
+    desktop_enter_text_parser = subparsers.add_parser(
+        "desktop-enter-text",
+        help="Confirm Premiere is frontmost, then type literal text at the current insertion point, unvalidated (macOS only)",
+    )
+    desktop_enter_text_parser.add_argument("text", help="Text to type")
+
+    desktop_enter_text_with_validate_parser = subparsers.add_parser(
+        "desktop-enter-text-with-validate",
+        help="Confirm Premiere is frontmost, type text into the focused field, and verify it read back correctly (macOS only). "
+             "CAVEAT: Premiere's own panels don't reliably report focus via AX — this often false-fails against them; "
+             "prefer desktop-enter-text + a screenshot for Premiere's own UI",
+    )
+    desktop_enter_text_with_validate_parser.add_argument("text", help="Text to type")
+    desktop_enter_text_with_validate_parser.add_argument(
+        "--attempts", type=int, default=3, help="Retry count if the read-back doesn't match (default: 3)",
+    )
+
+    desktop_move_mouse_parser = subparsers.add_parser(
+        "desktop-move-mouse",
+        help="Confirm Premiere is frontmost, then move the mouse cursor to screen coordinates (macOS only)",
+    )
+    desktop_move_mouse_parser.add_argument("--x", type=float, required=True, help="Target x coordinate")
+    desktop_move_mouse_parser.add_argument("--y", type=float, required=True, help="Target y coordinate")
+
+    desktop_click_mouse_parser = subparsers.add_parser(
+        "desktop-click-mouse",
+        help="Confirm Premiere is frontmost, then click the mouse — at given coordinates, or at the current cursor position (macOS only)",
+    )
+    desktop_click_mouse_parser.add_argument("--x", type=float, default=None, help="Click x coordinate (omit with --y to click at the current cursor position)")
+    desktop_click_mouse_parser.add_argument("--y", type=float, default=None, help="Click y coordinate (omit with --x to click at the current cursor position)")
+    desktop_click_mouse_parser.add_argument("--button", choices=["left", "right"], default="left", help="Mouse button (default: left)")
+
+    desktop_notify_parser = subparsers.add_parser(
+        "desktop-notify",
+        help="Show (or update, if already showing) an always-on-top notification window pinned top-right of the screen (macOS only)",
+    )
+    desktop_notify_parser.add_argument("message", help="Text to display")
+    desktop_notify_parser.add_argument(
+        "--state", choices=["waiting", "driving", "done", "info"], default="info",
+        help="Accent color: waiting=amber, driving=red, done=green, info=slate (default: info)",
+    )
+
+    subparsers.add_parser(
+        "desktop-dismiss-notifications",
+        help="Close the notification window opened by desktop-notify, if one is showing (macOS only)",
+    )
 
     create_sequence_parser = subparsers.add_parser("create-sequence", help="Create a new sequence")
     create_sequence_parser.add_argument("--name", required=True, help="Name of the new sequence")
@@ -2181,26 +2267,30 @@ def main() -> None:
         from premiere_cli import init_project
 
         sys.exit(init_project.init_project(args.project_name, args.series, args.base_dir))
-    if args.subcommand == "desktop-set-input-lut":
-        if platform.system() != "Darwin":
-            print(
-                json.dumps({"ok": False, "error": "desktop-set-input-lut is macOS only (drives the native Accessibility API)"}),
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        try:
-            from premiere_cli import desktop_driver
-        except ImportError as exc:
-            print(
-                json.dumps({
-                    "ok": False,
-                    "error": f"missing the macOS desktop-driver extra ({exc}) — install with: "
-                             "pip install 'premiere-cli[macos-desktop]'",
-                }),
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        sys.exit(desktop_driver.set_input_lut(args.path, port=args.port))
+    if args.subcommand == "desktop-take-screenshot":
+        desktop_driver = _load_desktop_driver(args.subcommand)
+        sys.exit(desktop_driver.take_screenshot(args.output_path, port=args.port))
+    if args.subcommand == "desktop-press-key":
+        desktop_driver = _load_desktop_driver(args.subcommand)
+        sys.exit(desktop_driver.press_key_by_name(args.key, modifiers=args.modifiers, port=args.port))
+    if args.subcommand == "desktop-enter-text":
+        desktop_driver = _load_desktop_driver(args.subcommand)
+        sys.exit(desktop_driver.enter_text(args.text, port=args.port))
+    if args.subcommand == "desktop-enter-text-with-validate":
+        desktop_driver = _load_desktop_driver(args.subcommand)
+        sys.exit(desktop_driver.enter_text_with_validate(args.text, attempts=args.attempts, port=args.port))
+    if args.subcommand == "desktop-move-mouse":
+        desktop_driver = _load_desktop_driver(args.subcommand)
+        sys.exit(desktop_driver.move_mouse(args.x, args.y, port=args.port))
+    if args.subcommand == "desktop-click-mouse":
+        desktop_driver = _load_desktop_driver(args.subcommand)
+        sys.exit(desktop_driver.click_mouse(x=args.x, y=args.y, button=args.button, port=args.port))
+    if args.subcommand == "desktop-notify":
+        desktop_driver = _load_desktop_driver(args.subcommand)
+        sys.exit(desktop_driver.notify(args.message, state=args.state))
+    if args.subcommand == "desktop-dismiss-notifications":
+        desktop_driver = _load_desktop_driver(args.subcommand)
+        sys.exit(desktop_driver.dismiss_notifications())
 
     if args.subcommand == "create-sequence":
         command_args = {"name": args.name, "bin": args.bin, "fps": args.fps, "width": args.width, "height": args.height}
