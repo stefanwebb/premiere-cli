@@ -3,13 +3,13 @@
 // same global ExtendScript context — shared helpers (ensureQEEnabled, ...)
 // are already defined there.
 //
-// QE-only enumeration: qe.project.getVideoTransitionList(). Per
-// PREMIERE_API_NOTES.md, PPro 2026 is known to return an EMPTY list here
-// even though by-name lookup (getVideoTransitionByName) still resolves
-// real transitions — an empty result is surfaced honestly (source:
-// "list") rather than treated as an error, and a probe of common
-// transition names via getVideoTransitionByName is appended as a
-// best-effort fallback (source: "byName") when the list came back empty.
+// QE-only enumeration: qe.project.getVideoTransitionList(), which returns a
+// plain array of STRINGS. Reading it as a collection of objects (numItems /
+// entry.name) is what made this look empty and produced
+// PREMIERE_API_NOTES.md's "PPro 2026 returns an EMPTY list" note — measured
+// 2026-07-24, it holds 110 entries. See ppbTransitionNamesFrom in index.jsx.
+// The by-name probe below is kept as a fallback (source: "byName") for a
+// build where the list genuinely is empty.
 
 var PPB_LIST_TRANSITIONS_PROBE_NAMES = [
   "Cross Dissolve", "Dip to Black", "Dip to White", "Film Dissolve",
@@ -28,11 +28,9 @@ function ppb_listAvailableTransitions(argsJson) {
     var transitions = [];
     var listError = null;
     try {
-      var list = qe.project.getVideoTransitionList();
-      for (var i = 0; i < list.numItems; i++) {
-        var entry = { name: null, index: i, source: "list" };
-        try { entry.name = list[i].name; } catch (e) { entry.name = null; }
-        transitions.push(entry);
+      var names = ppbTransitionNamesFrom(qe.project.getVideoTransitionList());
+      for (var i = 0; i < names.length; i++) {
+        transitions.push({ name: names[i], index: i, source: "list" });
       }
     } catch (e) {
       listError = e.toString();

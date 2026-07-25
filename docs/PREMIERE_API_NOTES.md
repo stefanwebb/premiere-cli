@@ -188,9 +188,28 @@ var comp = clip.components[clip.components.numItems - 1];
 ```
 
 - Enumeration: `qe.project.getVideoEffectList()/getAudioEffectList()/
-  getVideoTransitionList()/getAudioTransitionList()`. **PPro 2026:
-  getVideoTransitionList() returns empty — use getVideoTransitionByName**
-  [leancoderkavy].
+  getVideoTransitionList()/getAudioTransitionList()`. These return a plain
+  **array of STRINGS**, not a collection of objects: read `.length` and use
+  the entry itself as the name. **CORRECTED 2026-07-24** — the earlier note
+  here ("PPro 2026: getVideoTransitionList() returns empty" [leancoderkavy])
+  was our own bug, not a Premiere quirk: both list commands read `.numItems`
+  (undefined on an array, so the loop never ran) and `entry.name` (undefined
+  on a string). Measured on PPro 2026: **110 video** transitions and
+  **3 audio** ("Constant Power", "Constant Gain", "Exponential Fade").
+- **Audio transitions CAN be added** (corrects an earlier "video-only"
+  assumption): `addTransition` exists on QE audio clip objects and the
+  headline `qeClip.addTransition(tr, atEnd, duration)` form verifies first
+  try, with the transition resolved via
+  `qe.project.getAudioTransitionByName("Constant Power")`. Live-applied
+  2026-07-24 across 98 clips on one audio track.
+- **addTransition's duration argument is `"SS.FF"` (seconds.frames), NOT
+  decimal seconds.** Measured at 25fps: `"0.08"` produced an **8-frame**
+  (0.32s) transition, `"0.02"` produced exactly 2 frames, `"1.0"` produced
+  25 frames. Passing `String(durationSeconds)` therefore silently mis-sizes
+  any non-whole-second duration — see `ppbDurationSecFrames` in
+  `panel/host/index.jsx`.
+- `track.transitions[i].remove()` throws "Not Enough Parameters"; the form
+  that works is **`remove(false, false)`**.
 - **Component model**: `clip.components` — **[0]=Motion, [1]=Opacity,
   [2+]=applied effects** [ayushozha]; comp `.displayName`, `.matchName`
   (e.g. `AE.ADBE Motion`, `AE.ADBE Opacity`, `audioVolume`,

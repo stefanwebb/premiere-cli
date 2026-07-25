@@ -627,7 +627,7 @@ def test_main_get_project_info_sends_correct_args(monkeypatch, capsys, fake_pane
         "ok": True,
         "result": {
             "name": "vlog0002",
-            "path": "/Volumes/Extreme Pro/.../vlog0002.prproj",
+            "path": "/Volumes/MediaDrive/.../vlog0002.prproj",
             "numSequences": 1,
             "sequences": [{"name": "Sequence 01", "sequenceID": "guid-123", "frameRate": 25.0, "durationSeconds": 143.2}],
             "numRootItems": 4,
@@ -3781,6 +3781,64 @@ def test_main_batch_add_transitions_sends_correct_args(monkeypatch, fake_panel):
     assert body == {
         "command": "batch-add-transitions",
         "args": {"trackIndex": 1, "transitionName": "Cross Dissolve"},
+    }
+
+
+def test_main_add_transition_accepts_an_audio_track(monkeypatch, fake_panel):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "premiere-cli",
+            "--port", str(fake_panel),
+            "add-transition",
+            "--track-type", "audio",
+            "--track-index", "0",
+            "--clip-index", "3",
+            "--at-end", "false",
+            "--transition-name", "Constant Power",
+            "--duration-seconds", "0.08",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        premiere_cli.main()
+
+    _, body = _RecordingHandler.received[0]
+    assert body == {
+        "command": "add-transition",
+        "args": {
+            "trackType": "audio",
+            "trackIndex": 0,
+            "clipIndex": 3,
+            "atEnd": False,
+            "transitionName": "Constant Power",
+            "durationSeconds": 0.08,
+        },
+    }
+
+
+def test_main_batch_add_transitions_accepts_an_audio_track(monkeypatch, fake_panel):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "premiere-cli",
+            "--port", str(fake_panel),
+            "batch-add-transitions",
+            "--track-type", "audio",
+            "--track-index", "0",
+            "--duration-seconds", "0.08",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        premiere_cli.main()
+
+    _, body = _RecordingHandler.received[0]
+    assert body == {
+        "command": "batch-add-transitions",
+        "args": {"trackType": "audio", "trackIndex": 0, "durationSeconds": 0.08},
     }
 
 

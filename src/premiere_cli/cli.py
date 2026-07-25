@@ -1380,25 +1380,25 @@ def main() -> None:
     set_color_value_parser.add_argument("--blue", type=float, required=True, help="Blue channel, 0-255")
 
     add_transition_parser = subparsers.add_parser(
-        "add-transition", help="Add a video transition to a clip's start or end (QE DOM, disputed signature)"
+        "add-transition", help="Add a video or audio transition to a clip's start or end (QE DOM, disputed signature)"
     )
-    add_transition_parser.add_argument("--track-type", required=True, choices=["video"], help="Track type the clip is on (video only)")
-    add_transition_parser.add_argument("--track-index", type=int, required=True, help="0-based index of the video track")
+    add_transition_parser.add_argument("--track-type", required=True, choices=["video", "audio"], help="Track type the clip is on")
+    add_transition_parser.add_argument("--track-index", type=int, required=True, help="0-based index of the track")
     add_transition_parser.add_argument("--clip-index", type=int, required=True, help="0-based index of the clip on that track")
     add_transition_parser.add_argument("--at-end", required=True, choices=["true", "false"], help="true = apply at the clip's end, false = at its start")
-    add_transition_parser.add_argument("--transition-name", help="Transition name, e.g. 'Cross Dissolve' (omit for the default transition)")
+    add_transition_parser.add_argument("--transition-name", help="Transition name, e.g. 'Cross Dissolve' (video) or 'Constant Power' (audio); omit for the track type's default")
     add_transition_parser.add_argument("--duration-seconds", type=float, help="Transition duration in seconds (default: 1.0)")
     add_transition_parser.add_argument(
         "--sequence-name", help="Name of the sequence to edit (default: the currently active sequence)"
     )
 
     batch_add_transitions_parser = subparsers.add_parser(
-        "batch-add-transitions", help="Add the same transition to every clip on one video track (capped at 100)"
+        "batch-add-transitions", help="Add the same transition to every clip on one video or audio track (capped at 100)"
     )
-    batch_add_transitions_parser.add_argument("--track-type", choices=["video"], help="Track type (video only, default: video)")
-    batch_add_transitions_parser.add_argument("--track-index", type=int, help="0-based index of the video track (default: 0)")
+    batch_add_transitions_parser.add_argument("--track-type", choices=["video", "audio"], help="Track type (default: video)")
+    batch_add_transitions_parser.add_argument("--track-index", type=int, help="0-based index of the track (default: 0)")
     batch_add_transitions_parser.add_argument("--at-end", choices=["true", "false"], help="true = apply at each clip's end (default), false = at its start")
-    batch_add_transitions_parser.add_argument("--transition-name", help="Transition name, e.g. 'Cross Dissolve' (omit for the default transition)")
+    batch_add_transitions_parser.add_argument("--transition-name", help="Transition name, e.g. 'Cross Dissolve' (video) or 'Constant Power' (audio); omit for the track type's default")
     batch_add_transitions_parser.add_argument("--duration-seconds", type=float, help="Transition duration in seconds (default: 1.0)")
     batch_add_transitions_parser.add_argument(
         "--sequence-name", help="Name of the sequence to edit (default: the currently active sequence)"

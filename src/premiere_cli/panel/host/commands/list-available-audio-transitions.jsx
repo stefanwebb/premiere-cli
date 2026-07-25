@@ -3,10 +3,11 @@
 // same global ExtendScript context — shared helpers (ensureQEEnabled, ...)
 // are already defined there.
 //
-// QE-only enumeration: qe.project.getAudioTransitionList(). An empty list
-// is returned as-is (ok: true, count: 0) — truthful, not an error — since
-// the video-transition sibling command has a known-empty-list quirk on
-// PPro 2026 and audio transitions haven't been confirmed either way.
+// QE-only enumeration: qe.project.getAudioTransitionList(), which returns a
+// plain array of STRINGS. Reading it as a collection of objects (numItems /
+// entry.name) is what made this report zero — see ppbTransitionNamesFrom in
+// index.jsx. Measured 2026-07-24: 3 entries ("Constant Power",
+// "Constant Gain", "Exponential Fade").
 
 function ppb_listAvailableAudioTransitions(argsJson) {
   try {
@@ -18,11 +19,9 @@ function ppb_listAvailableAudioTransitions(argsJson) {
 
     var transitions = [];
     try {
-      var list = qe.project.getAudioTransitionList();
-      for (var i = 0; i < list.numItems; i++) {
-        var entry = { name: null, index: i };
-        try { entry.name = list[i].name; } catch (e) { entry.name = null; }
-        transitions.push(entry);
+      var names = ppbTransitionNamesFrom(qe.project.getAudioTransitionList());
+      for (var i = 0; i < names.length; i++) {
+        transitions.push({ name: names[i], index: i });
       }
     } catch (e) {
       return JSON.stringify({ ok: false, error: "getAudioTransitionList() failed: " + e.toString() });

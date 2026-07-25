@@ -747,10 +747,70 @@ function keyTimeToSeconds(keyTime) {
 // is verified the only reliable way available: a numItems delta on the
 // STANDARD DOM's track.transitions collection (QE addTransition's own
 // return value is not trustworthy — same lesson as export-frame's
-// exportFramePNG). Video-only: no reference repo demonstrates an
-// audio-transition "add" API, only add-transition's video enumeration
-// (list-available-transitions) and audio's own list-only command.
+// exportFramePNG).
+//
+// Audio works too, contrary to the earlier "video-only" note here: no
+// reference repo demonstrated an audio-transition add API, but probing the
+// live QE DOM (2026-07-24) found addTransition on audio clip objects, and
+// the very first argument form verified. Audio transitions resolve through
+// qe.project.getAudioTransitionByName ("Constant Power", "Constant Gain",
+// "Exponential Fade").
 // ---------------------------------------------------------------------------
+
+// addTransition's duration string is "SS.FF" — SECONDS.FRAMES, not decimal
+// seconds. Live-measured 2026-07-24 at 25fps: "0.08" produced an 8-frame
+// (0.32s) transition rather than a 2-frame one, and "0.02" produced exactly
+// 2 frames. String(durationSeconds) therefore silently mis-sizes any
+// non-whole-second duration, so every caller goes through this.
+function ppbDurationSecFrames(durationSeconds, fps) {
+  var totalFrames = Math.round(durationSeconds * fps);
+  if (totalFrames < 1) {
+    totalFrames = 1;
+  }
+  var whole = Math.floor(totalFrames / fps);
+  var frames = totalFrames - whole * fps;
+  return String(whole) + "." + (frames < 10 ? "0" + String(frames) : String(frames));
+}
+
+// qe.project.getVideoTransitionList() / getAudioTransitionList() return a
+// plain ARRAY OF STRINGS — not a Premiere collection of objects. Reading
+// `.numItems` on it yields undefined (so a `for` loop never runs) and
+// `entry.name` on a string yields undefined, which is why both list
+// commands reported zero transitions and PREMIERE_API_NOTES.md recorded a
+// non-existent "PPro 2026 returns an empty list" quirk. Measured
+// 2026-07-24: 110 video and 3 audio transitions. Handles the collection
+// shape too, in case another build differs.
+function ppbTransitionNamesFrom(list) {
+  var names = [];
+  if (!list) {
+    return names;
+  }
+  var count = null;
+  try { if (typeof list.length === "number") { count = list.length; } } catch (e) {}
+  if (count === null) {
+    try { if (typeof list.numItems === "number") { count = list.numItems; } } catch (e2) {}
+  }
+  if (count === null) {
+    return names;
+  }
+  for (var i = 0; i < count; i++) {
+    var entry = list[i];
+    var name = null;
+    try {
+      if (typeof entry === "string") {
+        name = entry;
+      } else if (entry && typeof entry.name === "string") {
+        name = entry.name;
+      } else if (entry !== null && entry !== undefined) {
+        name = String(entry);
+      }
+    } catch (e3) {
+      name = null;
+    }
+    names.push(name);
+  }
+  return names;
+}
 
 function ppbGetTrackTransitionsCount(track) {
   try {
@@ -774,14 +834,13 @@ function ppbReadLastTransitionName(track) {
 }
 
 // Applies one transition to one clip's start/end, addressed the same way
-// as get-full-clip-info (trackIndex/clipIndex on seq.videoTracks — video
-// only). `transitionQE` is the already-resolved QE transition object (or
-// null for "default transition", per ayushozha's addTransition(null, true,
-// "1.0") convention). Returns a plain object — never throws; every
-// failure mode is captured in the returned shape so callers (add-
-// transition, batch-add-transitions) can report per-clip results
-// uniformly.
-function ppbApplyTransitionToClip(seq, trackIndex, clipIndex, transitionQE, atEnd, durationSeconds) {
+// as get-full-clip-info (trackType/trackIndex/clipIndex).
+// `transitionQE` is the already-resolved QE transition object (or null for
+// "default transition", per ayushozha's addTransition(null, true, "1.0")
+// convention). Returns a plain object — never throws; every failure mode is
+// captured in the returned shape so callers (add-transition,
+// batch-add-transitions) can report per-clip results uniformly.
+function ppbApplyTransitionToClip(seq, trackType, trackIndex, clipIndex, transitionQE, atEnd, durationSeconds) {
   var out = {
     trackIndex: trackIndex,
     clipIndex: clipIndex,
@@ -795,17 +854,19 @@ function ppbApplyTransitionToClip(seq, trackIndex, clipIndex, transitionQE, atEn
     error: null
   };
 
+  var isAudio = trackType === "audio";
+  var trackCollection = isAudio ? seq.audioTracks : seq.videoTracks;
   var numTracks;
-  try { numTracks = seq.videoTracks.numTracks; } catch (e) { numTracks = 0; }
+  try { numTracks = trackCollection.numTracks; } catch (e) { numTracks = 0; }
   if (trackIndex >= numTracks) {
-    out.error = "trackIndex " + trackIndex + " is out of range — sequence has " + numTracks + " video track(s)";
+    out.error = "trackIndex " + trackIndex + " is out of range — sequence has " + numTracks + " " + trackType + " track(s)";
     return out;
   }
-  var track = seq.videoTracks[trackIndex];
+  var track = trackCollection[trackIndex];
   var numClips;
   try { numClips = track.clips.numItems; } catch (e2) { numClips = 0; }
   if (clipIndex >= numClips) {
-    out.error = "clipIndex " + clipIndex + " is out of range — track " + trackIndex + " has " + numClips + " clip(s)";
+    out.error = "clipIndex " + clipIndex + " is out of range — " + trackType + " track " + trackIndex + " has " + numClips + " clip(s)";
     return out;
   }
 
@@ -829,7 +890,7 @@ function ppbApplyTransitionToClip(seq, trackIndex, clipIndex, transitionQE, atEn
   var qeSeq, qeTrack, qeClip;
   try {
     qeSeq = qe.project.getActiveSequence();
-    qeTrack = qeSeq.getVideoTrackAt(trackIndex);
+    qeTrack = isAudio ? qeSeq.getAudioTrackAt(trackIndex) : qeSeq.getVideoTrackAt(trackIndex);
     qeClip = qeFindNthNonEmptyClip(qeTrack, clipIndex);
   } catch (e5) {
     out.error = "QE track/clip lookup failed: " + e5.toString();
@@ -840,8 +901,13 @@ function ppbApplyTransitionToClip(seq, trackIndex, clipIndex, transitionQE, atEn
     return out;
   }
 
+  var fps;
+  try { fps = getSequenceFps(seq); } catch (eFps) { fps = 25; }
+  var secFramesStr = ppbDurationSecFrames(durationSeconds, fps);
   var secondsStr = String(durationSeconds);
   var ticksStr = String(Math.round(durationSeconds * TICKS_PER_SECOND));
+  out.durationArg = secFramesStr;
+  out.fps = fps;
   var cutTicksStr = null;
   try { cutTicksStr = (atEnd ? clip.end.ticks : clip.start.ticks).toString(); } catch (e6) { cutTicksStr = null; }
 
@@ -873,6 +939,12 @@ function ppbApplyTransitionToClip(seq, trackIndex, clipIndex, transitionQE, atEn
   }
 
   // qeClip-level forms (per PREMIERE_API_NOTES.md's headline signature).
+  // "SS.FF" first: it is the form whose resulting duration has been
+  // measured to match what was asked for. String(durationSeconds) is kept
+  // only as a fallback, and mis-sizes anything but whole seconds.
+  attempt("qeClip.addTransition(tr, atEnd, secFramesString)", function () {
+    qeClip.addTransition(transitionQE, atEnd, secFramesStr);
+  });
   attempt("qeClip.addTransition(tr, atEnd, secondsString)", function () {
     qeClip.addTransition(transitionQE, atEnd, secondsStr);
   });

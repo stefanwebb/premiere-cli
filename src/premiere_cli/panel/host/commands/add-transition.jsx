@@ -8,8 +8,9 @@
 // addressing) and add_transition_to_clip (node_id+position addressing)
 // into one command, addressed the same way as get-full-clip-info
 // (trackType/trackIndex/clipIndex) rather than either reference's own
-// scheme — video-only (no reference repo demonstrates an audio-transition
-// "add" API). `atEnd: true` applies the transition at the clip's end
+// scheme. Both video and audio: probing the live QE DOM (2026-07-24) found
+// addTransition on audio clip objects too, so the earlier video-only
+// restriction is gone. `atEnd: true` applies the transition at the clip's end
 // (matching add_transition_to_clip's "end" position and the cut-point
 // between this clip and its successor); `atEnd: false` applies it at the
 // clip's start. The reference's "both" position is intentionally dropped
@@ -27,9 +28,10 @@ function ppb_addTransition(argsJson) {
       return JSON.stringify({ ok: false, error: "invalid args JSON: " + e.toString() });
     }
 
-    if (args.trackType !== "video") {
-      return JSON.stringify({ ok: false, error: "trackType must be \"video\" — no reference API demonstrates adding a transition to an audio track" });
+    if (args.trackType !== "video" && args.trackType !== "audio") {
+      return JSON.stringify({ ok: false, error: "trackType must be \"video\" or \"audio\"" });
     }
+    var isAudio = args.trackType === "audio";
     if (typeof args.trackIndex !== "number" || args.trackIndex < 0 || Math.floor(args.trackIndex) !== args.trackIndex) {
       return JSON.stringify({ ok: false, error: "trackIndex must be a non-negative integer" });
     }
@@ -51,7 +53,7 @@ function ppb_addTransition(argsJson) {
     // works and verifies. Substitute Cross Dissolve (Premiere's factory
     // default) rather than burning attempts on a known-dead path.
     if (transitionName === null) {
-      transitionName = "Cross Dissolve";
+      transitionName = isAudio ? "Constant Power" : "Cross Dissolve";
     }
     var durationSeconds = 1.0;
     if (typeof args.durationSeconds === "number") {
@@ -93,28 +95,33 @@ function ppb_addTransition(argsJson) {
     var transitionQE = null;
     if (transitionName !== null) {
       try {
-        if (qe.project.getVideoTransitionByName) {
+        if (isAudio) {
+          if (qe.project.getAudioTransitionByName) {
+            transitionQE = qe.project.getAudioTransitionByName(transitionName);
+          }
+        } else if (qe.project.getVideoTransitionByName) {
           transitionQE = qe.project.getVideoTransitionByName(transitionName);
         }
       } catch (e3) {
         transitionQE = null;
       }
       if (!transitionQE) {
-        return JSON.stringify({ ok: false, error: "transition not found: \"" + transitionName + "\" (try list-available-transitions)" });
+        return JSON.stringify({ ok: false, error: "transition not found: \"" + transitionName + "\" (try list-available-" + (isAudio ? "audio-" : "") + "transitions)" });
       }
     }
 
-    var applyResult = ppbApplyTransitionToClip(seq, args.trackIndex, args.clipIndex, transitionQE, args.atEnd, durationSeconds);
+    var applyResult = ppbApplyTransitionToClip(seq, args.trackType, args.trackIndex, args.clipIndex, transitionQE, args.atEnd, durationSeconds);
 
     var result = {
       sequenceName: seq.name,
-      trackType: "video",
+      trackType: args.trackType,
       trackIndex: args.trackIndex,
       clipIndex: args.clipIndex,
       clipName: applyResult.clipName,
       transitionName: transitionName,
       atEnd: args.atEnd,
       durationSeconds: durationSeconds,
+      durationArg: applyResult.durationArg,
       previousTransitionCount: applyResult.previousCount,
       newTransitionCount: applyResult.newCount,
       addedTransitionName: applyResult.addedTransitionName,

@@ -7,7 +7,7 @@
 // Port of the reference project's batch_add_transitions, generalized from
 // its fixed "at every cut point on a track" behavior to the same atEnd
 // semantic as add-transition: applies the SAME transition to every clip
-// on one video track (default atEnd: true, i.e. at each clip's end/the
+// on one video OR audio track (default atEnd: true, i.e. at each clip's end/the
 // cut point between it and its successor — matching the reference tool's
 // own loop). Capped at 100 clips per call. Reuses the shared
 // ppbApplyTransitionToClip helper per clip, so the disputed addTransition
@@ -26,9 +26,10 @@ function ppb_batchAddTransitions(argsJson) {
     }
 
     var trackType = args.trackType || "video";
-    if (trackType !== "video") {
-      return JSON.stringify({ ok: false, error: "trackType must be \"video\" — no reference API demonstrates adding a transition to an audio track" });
+    if (trackType !== "video" && trackType !== "audio") {
+      return JSON.stringify({ ok: false, error: "trackType must be \"video\" or \"audio\"" });
     }
+    var isAudio = trackType === "audio";
     var trackIndex = 0;
     if (typeof args.trackIndex === "number") {
       if (args.trackIndex < 0 || Math.floor(args.trackIndex) !== args.trackIndex) {
@@ -47,6 +48,12 @@ function ppb_batchAddTransitions(argsJson) {
       transitionName = args.transitionName;
     } else if (args.transitionName !== undefined && args.transitionName !== null) {
       return JSON.stringify({ ok: false, error: "transitionName must be a non-empty string, or omitted/null for the default transition" });
+    }
+    // Same substitution as add-transition: the null-transition ("default")
+    // form no-throws but adds NOTHING on this build, so name Premiere's
+    // factory default for the track type explicitly.
+    if (transitionName === null) {
+      transitionName = isAudio ? "Constant Power" : "Cross Dissolve";
     }
     var durationSeconds = 1.0;
     if (typeof args.durationSeconds === "number") {
@@ -76,14 +83,15 @@ function ppb_batchAddTransitions(argsJson) {
     }
 
     var numTracks;
-    try { numTracks = seq.videoTracks.numTracks; } catch (eNt) { numTracks = 0; }
+    var trackCollection = isAudio ? seq.audioTracks : seq.videoTracks;
+    try { numTracks = trackCollection.numTracks; } catch (eNt) { numTracks = 0; }
     if (trackIndex >= numTracks) {
       return JSON.stringify({ ok: false, error: "trackIndex " + trackIndex + " is out of range — sequence has " + numTracks + " video track(s)" });
     }
     var numClips;
-    try { numClips = seq.videoTracks[trackIndex].clips.numItems; } catch (eNc) { numClips = 0; }
+    try { numClips = trackCollection[trackIndex].clips.numItems; } catch (eNc) { numClips = 0; }
     if (numClips < 2) {
-      return JSON.stringify({ ok: true, result: { sequenceName: seq.name, trackType: "video", trackIndex: trackIndex, totalClipsOnTrack: numClips, attempted: 0, succeeded: 0, cappedAtLimit: false, results: [] } });
+      return JSON.stringify({ ok: true, result: { sequenceName: seq.name, trackType: trackType, trackIndex: trackIndex, totalClipsOnTrack: numClips, attempted: 0, succeeded: 0, cappedAtLimit: false, results: [] } });
     }
 
     try {
@@ -99,14 +107,18 @@ function ppb_batchAddTransitions(argsJson) {
     var transitionQE = null;
     if (transitionName !== null) {
       try {
-        if (qe.project.getVideoTransitionByName) {
+        if (isAudio) {
+          if (qe.project.getAudioTransitionByName) {
+            transitionQE = qe.project.getAudioTransitionByName(transitionName);
+          }
+        } else if (qe.project.getVideoTransitionByName) {
           transitionQE = qe.project.getVideoTransitionByName(transitionName);
         }
       } catch (e3) {
         transitionQE = null;
       }
       if (!transitionQE) {
-        return JSON.stringify({ ok: false, error: "transition not found: \"" + transitionName + "\" (try list-available-transitions)" });
+        return JSON.stringify({ ok: false, error: "transition not found: \"" + transitionName + "\" (try list-available-" + (isAudio ? "audio-" : "") + "transitions)" });
       }
     }
 
@@ -120,7 +132,7 @@ function ppb_batchAddTransitions(argsJson) {
     var results = [];
     var succeeded = 0;
     for (var c = 0; c < attemptCount; c++) {
-      var applyResult = ppbApplyTransitionToClip(seq, trackIndex, c, transitionQE, atEnd, durationSeconds);
+      var applyResult = ppbApplyTransitionToClip(seq, trackType, trackIndex, c, transitionQE, atEnd, durationSeconds);
       results.push({
         clipIndex: c,
         clipName: applyResult.clipName,
