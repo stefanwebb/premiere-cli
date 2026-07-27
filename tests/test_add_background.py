@@ -220,3 +220,63 @@ def test_timecode_to_seconds():
     assert _timecode_to_seconds("00:01:00", 25) == 1.0
     assert _timecode_to_seconds("00:01:12", 25) == pytest.approx(1.48)
     assert _timecode_to_seconds("01:01:01", 25) == pytest.approx(61.04)
+
+
+class TestSourceFrameGrid:
+    """A source whose frame rate differs from the sequence's must still tile.
+
+    Premiere trims the source on the SOURCE's frame grid, so an out point
+    quantised only to the sequence's grid lands sub-frame on the timeline and
+    Premiere floors it — every repeat comes out a frame short and leaves a
+    one-frame gap. Observed live: a 5.033s 30fps clip on a 25fps sequence
+    placed 43 repeats with 34 one-frame holes.
+    """
+
+    def test_loop_length_is_whole_frames_in_both_grids(self):
+        placements = plan_fill(spans([(0.0, 30.0)]), source_duration=5.0333,
+                               fps=25, source_fps=30)
+        for p in placements[:-1]:
+            assert p["out"] * 25 == pytest.approx(round(p["out"] * 25), abs=1e-6)
+            assert p["out"] * 30 == pytest.approx(round(p["out"] * 30), abs=1e-6)
+
+    def test_repeats_leave_no_gap(self):
+        placements = plan_fill(spans([(8.0, 16.32)]), source_duration=5.0333,
+                               fps=25, source_fps=30)
+        for earlier, later in zip(placements, placements[1:]):
+            assert earlier["start"] + earlier["out"] == pytest.approx(later["start"], abs=1e-6)
+
+    def test_loop_length_is_floored_not_stretched(self):
+        # 5.0333s at a 0.2s common grid floors to 5.0s — never rounds up past
+        # the media, which would place a frame that does not exist.
+        placements = plan_fill(spans([(0.0, 20.0)]), source_duration=5.0333,
+                               fps=25, source_fps=30)
+        assert placements[0]["out"] == pytest.approx(5.0)
+
+    def test_matching_frame_rates_are_unaffected(self):
+        placements = plan_fill(spans([(0.0, 20.0)]), source_duration=8.0,
+                               fps=25, source_fps=25)
+        assert placements[0]["out"] == pytest.approx(8.0)
+
+    def test_source_fps_defaults_to_the_sequence_grid(self):
+        placements = plan_fill(spans([(0.0, 20.0)]), source_duration=8.0, fps=25)
+        assert placements[0]["out"] == pytest.approx(8.0)
+
+
+def test_run_uses_the_source_frame_rate_reported_by_the_panel():
+    """The 30fps-source-on-25fps-sequence gap bug, at the driver level."""
+    class MixedRatePanel(FakePanel):
+        def __call__(self, command, args):
+            if command == "get-project-item-info":
+                self.calls.append((command, args))
+                return {"ok": True, "result": {
+                    "inPointSeconds": 0.0, "outPointSeconds": 5.0333, "frameRate": 30}}
+            return super().__call__(command, args)
+
+    panel = MixedRatePanel(fps=25)
+    res = _run(panel, intervals=spans([(8.0, 16.32)]))
+    assert res["result"]["sourceFps"] == 30
+    outs = [a["outSeconds"] for a in panel.of("set-item-in-out")][:-1]
+    starts = [a["startSeconds"] for a in panel.of("overwrite-clip-at")]
+    # each repeat starts exactly where the previous ended: no one-frame hole
+    for start, out, nxt in zip(starts, outs, starts[1:]):
+        assert start + out == pytest.approx(nxt, abs=1e-6)

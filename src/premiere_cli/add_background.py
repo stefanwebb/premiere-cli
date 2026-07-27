@@ -11,10 +11,21 @@ Which spans to fill is the caller's business: pass them in a cuts-style
 intervals file. The spans a *video project* wants (say, every motion graphic
 with no talking head behind it) come from that project's own script metadata,
 which this package knows nothing about.
+
+**⚠️ A background clip WITH AN AUDIO STREAM will destroy audio underneath it.**
+Placing video via `overwrite-clip-at` makes Premiere auto-link the source's
+audio onto an audio track; that command removes the audio it *added*, but the
+audio it *overwrote* is gone and undo does not work on this build. Observed
+live: filling 9 spans with a 5s h264+aac clip silently blew 221s of holes in
+the dialogue on A1. Before running, either strip the audio from the background
+file, or confirm the audio tracks it would land on are empty. `--dry-run`
+reports the plan; it cannot warn you about this, because the damage happens in
+Premiere, not here.
 """
 
 from __future__ import annotations
 
+from math import gcd
 from typing import Optional
 
 #: Anything shorter than this many frames is not worth an edit point.
@@ -37,19 +48,36 @@ def clip_intervals(
     return out
 
 
-def plan_fill(intervals: list[dict], source_duration: float, fps: float) -> list[dict]:
+def plan_fill(
+    intervals: list[dict],
+    source_duration: float,
+    fps: float,
+    source_fps: Optional[float] = None,
+) -> list[dict]:
     """Plan the placements that tile each interval with the source clip.
 
     The source repeats until the span is full and the final repeat is trimmed,
     so a span is covered exactly — no gap, no overhang. Every start and length
     is quantised to a whole frame: at sub-frame precision the repeats drift and
     leave a one-frame hole between them.
+
+    When the source's frame rate differs from the sequence's, the loop length
+    must be a whole number of frames in **both** grids. Premiere trims the
+    source on the SOURCE's grid, so a length that is whole only on the
+    sequence's grid lands sub-frame on the timeline and gets floored — every
+    repeat comes out a frame short and leaves a hole. A 5.033s 30fps clip on a
+    25fps sequence did exactly that across 43 repeats. The common grid for
+    25 and 30 is 0.2s, so the loop floors to 5.0s and tiles cleanly.
     """
     if source_duration <= 0:
         raise ValueError("source_duration must be positive")
 
     frame = 1.0 / fps
     loop_frames = max(1, int(round(source_duration * fps)))
+    if source_fps and abs(source_fps - fps) > 1e-9:
+        # Frames of the sequence grid that are also whole frames of the source's.
+        step = int(round(fps)) // gcd(int(round(fps)), int(round(source_fps)))
+        loop_frames = max(step, (loop_frames // step) * step)
     placements = []
     for interval in intervals:
         start_frame = int(round(interval["start"] * fps))
@@ -123,6 +151,8 @@ def run(
     item = info["result"]
     original_in = item.get("inPointSeconds") or 0.0
     original_out = item.get("outPointSeconds")
+    # Premiere trims on the source's own frame grid — see plan_fill.
+    source_fps = item.get("frameRate")
 
     duration = source_duration_seconds
     if duration is None:
@@ -148,13 +178,14 @@ def run(
         fps = float(match["frameRate"])
 
     spans = clip_intervals(intervals, start_seconds, end_seconds)
-    placements = plan_fill(spans, duration, fps)
+    placements = plan_fill(spans, duration, fps, source_fps=source_fps)
     plan = {
         "sequenceName": sequence_name,
         "trackIndex": track_index,
         "itemNodeId": node_id,
         "sourceDurationSeconds": round(duration, 3),
         "fps": fps,
+        "sourceFps": source_fps,
         "spans": len(spans),
         **summarise(placements),
     }
