@@ -112,9 +112,19 @@ Two API surfaces exist:
 Standard DOM (mostly untested by us — our QE-only findings in QE_DOM_NOTES.md):
 
 - **Insert (ripple)**: `seq.insertClip(projectItem, startTicksString, videoTrackIndex, audioTrackIndex)`.
-- **Overwrite**: `seq.overwriteClip(projectItem, start, vIdx, aIdx)` —
-  pass **`-1`** as the non-target index to place only the video or only
-  the audio side [leancoderkavy]. Track-level:
+- **Overwrite**: `seq.overwriteClip(projectItem, start, vIdx, aIdx)`.
+  **`-1` does NOT suppress the non-target side on PPro 2026** — corrected
+  2026-07-26 by live probe, against [leancoderkavy]'s "pass -1 as the
+  non-target index to place only the video or only the audio side".
+  Placing video with `aIdx = -1` succeeds and Premiere still auto-links the
+  source's audio onto **A1**, overwriting (and destroying) whatever was
+  there. Two other routes were tested and behave the same: the
+  source-monitor path (`overwrite-from-source`), and untargeting A1 /
+  targeting A2 first — the linked audio lands on A1 regardless of track
+  targeting. There appears to be **no API way to place video without the
+  linked audio arriving**; strip the audio from the source file instead
+  (`ffmpeg -i in.mp4 -c copy -an out.mp4`). `overwrite-clip-at` removes the
+  audio it ADDS, but cannot restore what the overwrite DESTROYED. Track-level:
   `track.overwriteClip(projectItem, seconds)` [hetpatel: seconds number;
   ayushozha: Time object]. (QE variant `qeTrack.overwrite(projectItem)`
   confirmed working on our build with a single arg.)

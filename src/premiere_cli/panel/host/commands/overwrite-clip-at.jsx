@@ -10,8 +10,9 @@
 // `seq.overwriteClip(item, startTicks, trackIndex, audioTrackIndex)`),
 // addressed here by trackType/trackIndex (this bridge's convention)
 // rather than separate video/audio track-index args — the non-addressed
-// side is passed `-1` per PREMIERE_API_NOTES.md ("pass -1 as the
-// non-target index to place only the video or only the audio side").
+// side is passed `-1`. NOTE (2026-07-26): `-1` does NOT actually suppress
+// that side on PPro 2026 — Premiere auto-links the audio onto A1 anyway,
+// which is why the cleanup below exists. See PREMIERE_API_NOTES.md.
 //
 // Signature is disputed across reference repos (seconds number vs Time
 // object vs ticks string) — every plausible form is tried, then a
