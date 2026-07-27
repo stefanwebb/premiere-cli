@@ -1410,6 +1410,37 @@ def main() -> None:
         "--sequence-name", help="Name of the sequence to edit (default: the currently active sequence)"
     )
 
+    sync_assets_parser = subparsers.add_parser(
+        "sync-assets",
+        help="Import every media file under an assets/ tree into matching bins, relinking any item that already has the name",
+    )
+    sync_assets_parser.add_argument(
+        "--assets-dir", required=True,
+        help="the assets/ directory to sync (bins mirror its subdirectories)",
+    )
+    sync_assets_parser.add_argument(
+        "--dry-run", action="store_true", help="report the plan without changing the project"
+    )
+
+    insert_clips_parser = subparsers.add_parser(
+        "insert-clips",
+        help="Place a bin's clips whose names start with an MM-SS-FF timecode onto a track at that time",
+    )
+    insert_clips_parser.add_argument("--bin-path", required=True, help="'/'-separated bin to read")
+    insert_clips_parser.add_argument(
+        "--track-type", choices=["video", "audio"], default="video", help="Track type (default: video)"
+    )
+    insert_clips_parser.add_argument("--track-index", type=int, required=True, help="0-based track index")
+    insert_clips_parser.add_argument(
+        "--fps", type=float, help="Frame rate the timecodes are in (default: the sequence's)"
+    )
+    insert_clips_parser.add_argument(
+        "--sequence-name", help="Name of the sequence to edit (default: the currently active sequence)"
+    )
+    insert_clips_parser.add_argument(
+        "--dry-run", action="store_true", help="report the plan without changing the timeline"
+    )
+
     add_background_parser = subparsers.add_parser(
         "add-background",
         help="Fill given time spans of a video track with a looped background clip, trimming the last repeat",
@@ -2308,6 +2339,29 @@ def main() -> None:
         from premiere_cli import init_project
 
         sys.exit(init_project.init_project(args.project_name, args.series, args.base_dir))
+    if args.subcommand == "sync-assets":
+        from premiere_cli import sync_assets as sync_assets_mod
+
+        response = sync_assets_mod.run(
+            lambda command, command_args: submit_command(command, command_args, port=args.port),
+            args.assets_dir, dry_run=args.dry_run,
+        )
+        print(json.dumps(response, indent=2))
+        sys.exit(0 if response.get("ok") else 1)
+    if args.subcommand == "insert-clips":
+        from premiere_cli import insert_clips as insert_clips_mod
+
+        response = insert_clips_mod.run(
+            lambda command, command_args: submit_command(command, command_args, port=args.port),
+            sequence_name=args.sequence_name,
+            bin_path=args.bin_path,
+            track_type=args.track_type,
+            track_index=args.track_index,
+            fps=args.fps,
+            dry_run=args.dry_run,
+        )
+        print(json.dumps(response, indent=2))
+        sys.exit(0 if response.get("ok") else 1)
     if args.subcommand == "add-background":
         from premiere_cli import add_background as add_background_mod
 
