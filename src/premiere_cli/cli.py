@@ -73,6 +73,12 @@ def _parse_intervals_file(path: str) -> list:
     return intervals
 
 
+def _timecode_to_seconds(timecode: str, fps: float) -> float:
+    """Convert an "MM:SS:FF" timecode to seconds at `fps`."""
+    minutes, seconds, frames = (int(part) for part in timecode.split(":"))
+    return minutes * 60 + seconds + frames / fps
+
+
 def submit_command(command: str, args: dict | None = None, port: int = DEFAULT_PORT) -> dict:
     """POST a command to the Premiere Bridge panel's /command endpoint.
 
@@ -1404,6 +1410,41 @@ def main() -> None:
         "--sequence-name", help="Name of the sequence to edit (default: the currently active sequence)"
     )
 
+    add_background_parser = subparsers.add_parser(
+        "add-background",
+        help="Fill given time spans of a video track with a looped background clip, trimming the last repeat",
+    )
+    add_background_parser.add_argument(
+        "--sequence-name", help="Name of the sequence to edit (default: the currently active sequence)"
+    )
+    add_background_parser.add_argument(
+        "--track-index", type=int, required=True, help="0-based index of the video track to fill"
+    )
+    bg_source = add_background_parser.add_mutually_exclusive_group(required=True)
+    bg_source.add_argument("--item-node-id", help="Node ID of the background project item")
+    bg_source.add_argument("--item-name", help="Name of the background project item (must be unique)")
+    add_background_parser.add_argument(
+        "--intervals-file", required=True,
+        help="Cuts-style file of spans to fill, one 'MM:SS:FF - MM:SS:FF' per line. "
+             "Which spans a video needs is the caller's business — see the command's docs.",
+    )
+    add_background_parser.add_argument(
+        "--start-seconds", type=float, help="Only fill at or after this time"
+    )
+    add_background_parser.add_argument(
+        "--end-seconds", type=float, help="Only fill up to this time"
+    )
+    add_background_parser.add_argument(
+        "--source-duration-seconds", type=float,
+        help="Loop length to use (default: the source item's own in/out span)",
+    )
+    add_background_parser.add_argument(
+        "--fps", type=float, help="Frame grid to quantise to (default: the sequence's frame rate)"
+    )
+    add_background_parser.add_argument(
+        "--dry-run", action="store_true", help="Report the planned placements without changing the timeline"
+    )
+
     remove_transition_parser = subparsers.add_parser(
         "remove-transition", help="Remove a transition from a track (standard DOM, disputed remove() arity); lists transitions if the index is out of range"
     )
@@ -2267,6 +2308,49 @@ def main() -> None:
         from premiere_cli import init_project
 
         sys.exit(init_project.init_project(args.project_name, args.series, args.base_dir))
+    if args.subcommand == "add-background":
+        from premiere_cli import add_background as add_background_mod
+
+        try:
+            spans = _parse_intervals_file(args.intervals_file)
+        except (OSError, ValueError) as exc:
+            print(json.dumps({"ok": False, "error": str(exc)}), file=sys.stderr)
+            sys.exit(1)
+        fps_for_parse = args.fps
+        if fps_for_parse is None:
+            probe = submit_command("get-project-info", {}, port=args.port)
+            if not probe.get("ok"):
+                print(json.dumps(probe), file=sys.stderr)
+                sys.exit(1)
+            sequences = probe["result"].get("sequences") or []
+            target = args.sequence_name or (sequences[0]["name"] if sequences else None)
+            match = next((sq for sq in sequences if sq["name"] == target), None)
+            if match is None:
+                print(json.dumps({"ok": False, "error": f"no sequence named {target!r} is open"}), file=sys.stderr)
+                sys.exit(1)
+            fps_for_parse = float(match["frameRate"])
+        seconds = [
+            {
+                "start": _timecode_to_seconds(sp["start"], fps_for_parse),
+                "end": _timecode_to_seconds(sp["end"], fps_for_parse),
+            }
+            for sp in spans
+        ]
+        response = add_background_mod.run(
+            lambda command, command_args: submit_command(command, command_args, port=args.port),
+            sequence_name=args.sequence_name,
+            track_index=args.track_index,
+            item_node_id=args.item_node_id,
+            item_name=args.item_name,
+            intervals=seconds,
+            start_seconds=args.start_seconds,
+            end_seconds=args.end_seconds,
+            source_duration_seconds=args.source_duration_seconds,
+            fps=fps_for_parse,
+            dry_run=args.dry_run,
+        )
+        print(json.dumps(response, indent=2))
+        sys.exit(0 if response.get("ok") else 1)
     if args.subcommand == "desktop-take-screenshot":
         desktop_driver = _load_desktop_driver(args.subcommand)
         sys.exit(desktop_driver.take_screenshot(args.output_path, port=args.port))
