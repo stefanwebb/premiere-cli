@@ -2447,6 +2447,46 @@ def test_main_delete_marker_project_item_addressing(monkeypatch, fake_panel):
     assert body["args"] == {"guid": "abc-123", "nodeId": "000f4254"}
 
 
+def test_main_delete_all_markers_defaults_to_active_sequence(monkeypatch, fake_panel):
+    monkeypatch.setattr(
+        sys, "argv", ["premiere-cli", "--port", str(fake_panel), "delete-all-markers"],
+    )
+
+    with pytest.raises(SystemExit):
+        premiere_cli.main()
+
+    _, body = _RecordingHandler.received[0]
+    assert body == {"command": "delete-all-markers", "args": {}}
+
+
+def test_main_delete_all_markers_sends_sequence_name(monkeypatch, fake_panel):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["premiere-cli", "--port", str(fake_panel), "delete-all-markers", "--sequence-name", "good cut"],
+    )
+
+    with pytest.raises(SystemExit):
+        premiere_cli.main()
+
+    _, body = _RecordingHandler.received[0]
+    assert body == {"command": "delete-all-markers", "args": {"sequenceName": "good cut"}}
+
+
+def test_main_delete_all_markers_project_item_addressing(monkeypatch, fake_panel):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["premiere-cli", "--port", str(fake_panel), "delete-all-markers", "--item-name", "clip.mp4"],
+    )
+
+    with pytest.raises(SystemExit):
+        premiere_cli.main()
+
+    _, body = _RecordingHandler.received[0]
+    assert body == {"command": "delete-all-markers", "args": {"itemName": "clip.mp4"}}
+
+
 def test_main_set_clip_position_sends_correct_args(monkeypatch, fake_panel):
     monkeypatch.setattr(
         sys,

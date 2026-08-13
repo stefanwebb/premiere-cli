@@ -775,6 +775,19 @@ def main() -> None:
         "--item-name", help="Exact name of a PROJECT ITEM to delete the marker from instead of a sequence"
     )
 
+    delete_all_markers_parser = subparsers.add_parser(
+        "delete-all-markers", help="Delete every marker on a sequence or project item"
+    )
+    delete_all_markers_parser.add_argument(
+        "--sequence-name", help="Name of the sequence to clear markers from (default: the currently active sequence)"
+    )
+    delete_all_markers_parser.add_argument(
+        "--node-id", help="Node ID of a PROJECT ITEM to clear markers from instead of a sequence"
+    )
+    delete_all_markers_parser.add_argument(
+        "--item-name", help="Exact name of a PROJECT ITEM to clear markers from instead of a sequence"
+    )
+
     add_marker_to_item_parser = subparsers.add_parser(
         "add-marker-to-project-item", help="Add a source marker to a project item"
     )
@@ -2671,6 +2684,13 @@ def main() -> None:
         command_args = {
             "guid": args.guid,
             "markerName": args.marker_name,
+            "sequenceName": args.sequence_name,
+            "nodeId": args.node_id,
+            "itemName": args.item_name,
+        }
+        command_args = {k: v for k, v in command_args.items() if v is not None}
+    elif args.subcommand == "delete-all-markers":
+        command_args = {
             "sequenceName": args.sequence_name,
             "nodeId": args.node_id,
             "itemName": args.item_name,

@@ -5,7 +5,7 @@ const PORT = 47823;
 // Kept in lockstep with the premiere-cli Python package version —
 // `premiere-cli doctor` compares the two and warns when the installed
 // panel is stale relative to the CLI that ships it.
-const PANEL_VERSION = '0.4.2';
+const PANEL_VERSION = '0.4.3';
 const VALID_LEVELS = ['info', 'warn', 'error'];
 
 // main.js is loaded via a plain <script src="js/main.js"> tag, not
@@ -98,6 +98,7 @@ const ALLOWED_COMMANDS = [
   'add-marker',
   'update-marker',
   'delete-marker',
+  'delete-all-markers',
   'add-marker-to-project-item',
   'redo',
   'undo',

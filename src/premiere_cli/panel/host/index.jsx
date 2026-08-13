@@ -1150,6 +1150,7 @@ var PPB_COMMANDS = {
   "add-marker": { file: "add-marker.jsx", fn: "ppb_addMarker" },
   "update-marker": { file: "update-marker.jsx", fn: "ppb_updateMarker" },
   "delete-marker": { file: "delete-marker.jsx", fn: "ppb_deleteMarker" },
+  "delete-all-markers": { file: "delete-all-markers.jsx", fn: "ppb_deleteAllMarkers" },
   "add-marker-to-project-item": { file: "add-marker-to-project-item.jsx", fn: "ppb_addMarkerToProjectItem" },
   "redo": { file: "redo.jsx", fn: "ppb_redo" },
   "undo": { file: "undo.jsx", fn: "ppb_undo" },
