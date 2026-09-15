@@ -100,6 +100,56 @@ New negative findings from the same session:
 
 ## APIs that lie (no-throw or wrong return, but effect differs)
 
+- **`remove-track-intervals` SILENTLY DESYNCS LINKED A/V CLIPS**
+  (live-observed 2026-08-29, Premiere 2026, a 26-clip silence-removal pass
+  over linked camera+mic clips). Called with both `audioTrackIndex` and
+  `videoTrackIndices`, it left the picture correct and slipped **17 of 26
+  audio clips' source in-points** by −320 ms to −2760 ms. Timeline
+  positions, clip count, sequence duration and `coveragePercent` were all
+  *unchanged and correct* — the corruption is a slip, not a trim, so none
+  of the usual health metrics can see it.
+
+  Observed, not inferred: the run emitted 26 `Audio 1: N of M segment(s)
+  in range could not be removed` warnings; afterwards
+  `audio.inPointSeconds - video.inPointSeconds` was the correct constant
+  sync offset on 9 clips and wrong on 17; video in-points were untouched;
+  duration was exactly the expected 71.24 s with 100 % coverage on both
+  tracks.
+
+  Most probable mechanism (inferred from
+  `commands/remove-track-intervals.jsx`, not directly instrumented):
+  `findAndRemoveInRange()` judges success **solely by a `qeTrack.numItems`
+  drop**, and on failure walks all four `target.remove(bool, bool)`
+  combinations in sequence. On a *linked* clip the audio-side removal is
+  entangled with the video side, so a call can mutate the clip — moving
+  its source in-point — without changing `numItems`. That registers as
+  "failed", the loop proceeds to the next combination, and nothing
+  restores the state the previous attempt left behind. Audio is processed
+  before video in each interval, so the video pass then ripple-deletes the
+  linked pair and the mutated audio in-point survives into the result.
+
+  **Workaround (verified):** unlink first, then apply the intervals to both
+  tracks, then relink pair-by-pair — both tracks receive identical cuts, so
+  a constant offset is preserved. Re-run on the same footage this way gave
+  **0/26 desynced, 0.000 ms worst drift**. Pointing `audioTrackIndex` at an
+  empty track to let the linked video pass do the work does NOT work: it
+  corrupts the ripple (V1 fell to 42.5 % coverage, A1 fragmented 26 → 58
+  clips). There is no video-only mode; `audioTrackIndex` is required.
+
+  **Verification:** never accept duration/`coveragePercent` as evidence of
+  sync. Walk every clip pair with `get-full-clip-info` and assert
+  `audio.inPointSeconds - video.inPointSeconds` equals the constant offset
+  established at sync time. Treat any `could not be removed` warning as a
+  defect to investigate, not noise — those warnings were the real signal
+  here and were dismissed as benign for hours.
+
+  **Repair without rebuilding:** `trim-clip --in-point-seconds` sets a
+  clip's source in-point WITHOUT moving it on the timeline, so a slipped
+  clip can be pushed back in place. Unlink first so it cannot drag the
+  picture, and assert `startSeconds`/`endSeconds` are unchanged after each
+  call. This repairs a nested source in situ, which fixes every sequence
+  that nests it.
+
 - **`seq.insertClip()` / `seq.overwriteClip()` IGNORE their video-track
   index** — clips land on a build-chosen track regardless (tested: index
   0 and 1, active and inactive sequence, targeting on/off, insert and
