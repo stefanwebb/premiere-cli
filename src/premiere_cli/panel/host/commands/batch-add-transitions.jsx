@@ -86,7 +86,7 @@ function ppb_batchAddTransitions(argsJson) {
     var trackCollection = isAudio ? seq.audioTracks : seq.videoTracks;
     try { numTracks = trackCollection.numTracks; } catch (eNt) { numTracks = 0; }
     if (trackIndex >= numTracks) {
-      return JSON.stringify({ ok: false, error: "trackIndex " + trackIndex + " is out of range — sequence has " + numTracks + " video track(s)" });
+      return JSON.stringify({ ok: false, error: "trackIndex " + trackIndex + " is out of range — sequence has " + numTracks + " " + trackType + " track(s)" });
     }
     var numClips;
     try { numClips = trackCollection[trackIndex].clips.numItems; } catch (eNc) { numClips = 0; }
@@ -141,6 +141,10 @@ function ppb_batchAddTransitions(argsJson) {
         addedTransitionName: applyResult.addedTransitionName,
         verified: applyResult.verified,
         succeededWithArgs: applyResult.succeededWithArgs,
+        qeAtEndArg: applyResult.qeAtEndArg,
+        targetSeconds: applyResult.targetSeconds,
+        placedStartSeconds: applyResult.placedStartSeconds,
+        placedEndSeconds: applyResult.placedEndSeconds,
         error: applyResult.verified ? null : applyResult.error
       });
       if (applyResult.verified) {
@@ -152,7 +156,7 @@ function ppb_batchAddTransitions(argsJson) {
       ok: true,
       result: {
         sequenceName: seq.name,
-        trackType: "video",
+        trackType: trackType,
         trackIndex: trackIndex,
         transitionName: transitionName,
         atEnd: atEnd,

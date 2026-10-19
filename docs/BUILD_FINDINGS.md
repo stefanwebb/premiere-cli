@@ -172,6 +172,19 @@ New negative findings from the same session:
   adds nothing**, while a NAMED transition (e.g. Cross Dissolve) works
   and verifies. `add-transition` substitutes Cross Dissolve when no name
   is given.
+- **`qeClip.addTransition(tr, flag, duration)`'s `flag` is NOT "at end"**
+  (live-observed 2026-10-18, Premiere 26.5.2, audio track, Constant
+  Power): `flag=true` placed the transition at the clip's START and
+  `flag=false` at its END. A batch over clips `0..n-2` with `true` therefore
+  put a stray fade-in at 0:00 and skipped the last cut, while every
+  count-based check reported 49/49 success. `ppbApplyTransitionToClip`
+  now passes `!atEnd` first, checks the new transition's span actually
+  covers the intended cut, and if not removes it and retries with the
+  other flag — `qeAtEndArg` in the result records which sense worked.
+  Video tracks share the inverted sense (live-verified the same day:
+  `batch-add-transitions` on a 50-clip video track placed all 49 Cross
+  Dissolves on their cuts with `qeAtEndArg: false`, and single
+  `add-transition` calls landed correctly both ways on audio and video).
 - **`seq.close()` closes only the UI tab** — the sequence remains in
   `app.project.sequences`.
 - **Directory enumeration returns empty for some paths** (`/tmp`,

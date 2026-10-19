@@ -833,8 +833,72 @@ function ppbReadLastTransitionName(track) {
   }
 }
 
+// Every transition's [start, end] on a track, in seconds, in collection
+// order. An unreadable bound is null.
+function ppbReadTransitionSpans(track) {
+  var spans = [];
+  var n = ppbGetTrackTransitionsCount(track);
+  if (n === null) {
+    return spans;
+  }
+  for (var i = 0; i < n; i++) {
+    var span = { start: null, end: null };
+    try { span.start = timeValueToSeconds(track.transitions[i].start); } catch (e) { span.start = null; }
+    try { span.end = timeValueToSeconds(track.transitions[i].end); } catch (e2) { span.end = null; }
+    spans.push(span);
+  }
+  return spans;
+}
+
+// Index of the first span in `after` with no exact match in `before` —
+// i.e. the transition an addTransition call just created — or -1.
+function ppbFindNewTransitionIndex(before, after) {
+  for (var i = 0; i < after.length; i++) {
+    var matched = false;
+    for (var j = 0; j < before.length; j++) {
+      if (before[j].start === after[i].start && before[j].end === after[i].end) {
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+// Removes track.transitions[index], probing the same remove() arities as
+// remove-transition. True only if the count dropped by exactly one.
+function ppbRemoveTransitionAt(track, index) {
+  var forms = [
+    function (t) { t.remove(false, false); },
+    function (t) { t.remove(false); },
+    function (t) { t.remove(); }
+  ];
+  for (var f = 0; f < forms.length; f++) {
+    var before = ppbGetTrackTransitionsCount(track);
+    try { forms[f](track.transitions[index]); } catch (e) { continue; }
+    var after = ppbGetTrackTransitionsCount(track);
+    if (before !== null && after === before - 1) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Applies one transition to one clip's start/end, addressed the same way
 // as get-full-clip-info (trackType/trackIndex/clipIndex).
+//
+// QE's addTransition(tr, flag, duration) flag is NOT "at end" on this build:
+// live-observed 2026-10-18 on an audio track, flag=true placed the transition
+// at the clip's START and flag=false at its END. So each form is tried with
+// flag = !atEnd first, and every placement is checked against the intended
+// cut point (clip.end for atEnd, clip.start otherwise). A transition that
+// lands on the wrong edge is removed again and the same form retried with
+// the opposite flag — so if video tracks (or a later build) use the other
+// sense, the result is still correct and `qeAtEndArg` reports which one
+// worked. A transitions-count increase alone is never treated as success.
 // `transitionQE` is the already-resolved QE transition object (or null for
 // "default transition", per ayushozha's addTransition(null, true, "1.0")
 // convention). Returns a plain object — never throws; every failure mode is
@@ -910,69 +974,106 @@ function ppbApplyTransitionToClip(seq, trackType, trackIndex, clipIndex, transit
   out.fps = fps;
   var cutTicksStr = null;
   try { cutTicksStr = (atEnd ? clip.end.ticks : clip.start.ticks).toString(); } catch (e6) { cutTicksStr = null; }
+  var targetSeconds = null;
+  try { targetSeconds = timeValueToSeconds(atEnd ? clip.end : clip.start); } catch (eT) { targetSeconds = null; }
+  out.targetSeconds = targetSeconds;
+  // Half a frame either side, so a frame-quantised edge still counts as
+  // covering the cut.
+  var coverTolerance = 0.5 / (fps || 25);
 
+  // Tries one form with QE flag = !atEnd, then (if that lands on the wrong
+  // edge) with flag = atEnd. `fn(flag)` makes the call.
   function attempt(label, fn) {
-    if (out.verified) {
-      return;
-    }
-    var entry = { form: label };
-    try {
-      fn();
-      entry.success = true;
-    } catch (e7) {
-      entry.success = false;
-      entry.error = e7.toString();
+    var flags = [!atEnd, atEnd];
+    for (var k = 0; k < flags.length; k++) {
+      if (out.verified || out.error) {
+        return;
+      }
+      var flag = flags[k];
+      var entry = { form: label, qeAtEndArg: flag };
+      var spansBefore = ppbReadTransitionSpans(track);
+      try {
+        fn(flag);
+        entry.success = true;
+      } catch (e7) {
+        entry.success = false;
+        entry.error = e7.toString();
+        out.attempts.push(entry);
+        return;  // a throw is about the argument form, not the flag
+      }
+      var newCount = ppbGetTrackTransitionsCount(track);
+      if (newCount === null || out.previousCount === null || newCount <= out.previousCount) {
+        entry.note = "call did not throw, but transitions count did not increase — treating as unverified";
+        out.attempts.push(entry);
+        return;
+      }
+      var spansAfter = ppbReadTransitionSpans(track);
+      var newIndex = ppbFindNewTransitionIndex(spansBefore, spansAfter);
+      var span = newIndex >= 0 ? spansAfter[newIndex] : null;
+      entry.placedStartSeconds = span ? span.start : null;
+      entry.placedEndSeconds = span ? span.end : null;
+      var covers = span !== null && targetSeconds !== null && span.start !== null && span.end !== null &&
+        span.start <= targetSeconds + coverTolerance && span.end >= targetSeconds - coverTolerance;
+      if (covers) {
+        entry.verifiedCount = newCount;
+        out.verified = true;
+        out.newCount = newCount;
+        out.succeededWithArgs = label;
+        out.qeAtEndArg = flag;
+        out.placedStartSeconds = span.start;
+        out.placedEndSeconds = span.end;
+        out.addedTransitionName = ppbReadLastTransitionName(track);
+        out.attempts.push(entry);
+        return;
+      }
+      // Wrong edge (or position unreadable): take it back out before retrying.
+      entry.note = "transition did not cover the target cut at " + targetSeconds + "s — removing it";
+      entry.removedMisplaced = newIndex >= 0 && ppbRemoveTransitionAt(track, newIndex);
       out.attempts.push(entry);
-      return;
+      if (!entry.removedMisplaced) {
+        out.error = "a transition landed away from the target cut and could not be removed — check transition " +
+          newIndex + " on this track by hand";
+        out.newCount = ppbGetTrackTransitionsCount(track);
+        return;
+      }
     }
-    var newCount = ppbGetTrackTransitionsCount(track);
-    if (newCount !== null && out.previousCount !== null && newCount > out.previousCount) {
-      entry.verifiedCount = newCount;
-      out.verified = true;
-      out.newCount = newCount;
-      out.succeededWithArgs = label;
-      out.addedTransitionName = ppbReadLastTransitionName(track);
-    } else {
-      entry.note = "call did not throw, but transitions count did not increase — treating as unverified";
-    }
-    out.attempts.push(entry);
   }
 
   // qeClip-level forms (per PREMIERE_API_NOTES.md's headline signature).
   // "SS.FF" first: it is the form whose resulting duration has been
   // measured to match what was asked for. String(durationSeconds) is kept
   // only as a fallback, and mis-sizes anything but whole seconds.
-  attempt("qeClip.addTransition(tr, atEnd, secFramesString)", function () {
-    qeClip.addTransition(transitionQE, atEnd, secFramesStr);
+  attempt("qeClip.addTransition(tr, flag, secFramesString)", function (flag) {
+    qeClip.addTransition(transitionQE, flag, secFramesStr);
   });
-  attempt("qeClip.addTransition(tr, atEnd, secondsString)", function () {
-    qeClip.addTransition(transitionQE, atEnd, secondsStr);
+  attempt("qeClip.addTransition(tr, flag, secondsString)", function (flag) {
+    qeClip.addTransition(transitionQE, flag, secondsStr);
   });
-  attempt("qeClip.addTransition(tr, atEnd, ticksString)", function () {
-    qeClip.addTransition(transitionQE, atEnd, ticksStr);
+  attempt("qeClip.addTransition(tr, flag, ticksString)", function (flag) {
+    qeClip.addTransition(transitionQE, flag, ticksStr);
   });
-  attempt("qeClip.addTransition(tr, atEnd, secondsString, \"0\")", function () {
-    qeClip.addTransition(transitionQE, atEnd, secondsStr, "0");
+  attempt("qeClip.addTransition(tr, flag, secondsString, \"0\")", function (flag) {
+    qeClip.addTransition(transitionQE, flag, secondsStr, "0");
   });
-  attempt("qeClip.addTransition(tr, atEnd, ticksString, \"0\", false)", function () {
-    qeClip.addTransition(transitionQE, atEnd, ticksStr, "0", false);
+  attempt("qeClip.addTransition(tr, flag, ticksString, \"0\", false)", function (flag) {
+    qeClip.addTransition(transitionQE, flag, ticksStr, "0", false);
   });
-  attempt("qeClip.addTransition(tr, atEnd, durationSecondsNumber)", function () {
-    qeClip.addTransition(transitionQE, atEnd, durationSeconds);
+  attempt("qeClip.addTransition(tr, flag, durationSecondsNumber)", function (flag) {
+    qeClip.addTransition(transitionQE, flag, durationSeconds);
   });
   // qeTrack-level forms (leancoderkavy's own reference implementation —
   // cut-point ticks + duration ticks + alignment + reverse booleans).
   if (cutTicksStr !== null) {
-    attempt("qeTrack.addTransition(tr, atEnd, cutTicks, durationTicks, \"0\", false)", function () {
-      qeTrack.addTransition(transitionQE, atEnd, cutTicksStr, ticksStr, "0", false);
+    attempt("qeTrack.addTransition(tr, flag, cutTicks, durationTicks, \"0\", false)", function (flag) {
+      qeTrack.addTransition(transitionQE, flag, cutTicksStr, ticksStr, "0", false);
     });
-    attempt("qeTrack.addTransition(tr, atEnd, cutTicks, durationSeconds, \"0\", false)", function () {
-      qeTrack.addTransition(transitionQE, atEnd, cutTicksStr, secondsStr, "0", false);
+    attempt("qeTrack.addTransition(tr, flag, cutTicks, durationSeconds, \"0\", false)", function (flag) {
+      qeTrack.addTransition(transitionQE, flag, cutTicksStr, secondsStr, "0", false);
     });
   }
 
-  if (!out.verified) {
-    out.error = "could not add the transition with any known argument form — see attempts";
+  if (!out.verified && !out.error) {
+    out.error = "could not add the transition at the target cut with any known argument form — see attempts";
   }
 
   return out;

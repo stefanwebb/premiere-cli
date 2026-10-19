@@ -13,7 +13,9 @@
 // restriction is gone. `atEnd: true` applies the transition at the clip's end
 // (matching add_transition_to_clip's "end" position and the cut-point
 // between this clip and its successor); `atEnd: false` applies it at the
-// clip's start. The reference's "both" position is intentionally dropped
+// clip's start. Those are the positions actually produced — QE's own flag
+// has the opposite sense on this build, which the shared helper corrects
+// and verifies (see ppbApplyTransitionToClip). The reference's "both" position is intentionally dropped
 // — call this command twice (once per atEnd value) to reproduce it.
 // `transitionName` omitted/null = the default transition, per ayushozha's
 // addTransition(null, true, "1.0") convention. All the actual apply-and-
@@ -127,7 +129,11 @@ function ppb_addTransition(argsJson) {
       addedTransitionName: applyResult.addedTransitionName,
       verified: applyResult.verified,
       attempts: applyResult.attempts,
-      succeededWithArgs: applyResult.succeededWithArgs
+      succeededWithArgs: applyResult.succeededWithArgs,
+      qeAtEndArg: applyResult.qeAtEndArg,
+      targetSeconds: applyResult.targetSeconds,
+      placedStartSeconds: applyResult.placedStartSeconds,
+      placedEndSeconds: applyResult.placedEndSeconds
     };
 
     if (!applyResult.verified) {
